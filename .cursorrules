@@ -1,0 +1,38 @@
+# SME ERP — Cursor Rules (Single Source of Truth)
+
+## Tech Stack
+- Framework: Next.js 15 (App Router, TypeScript, Turbopack)
+- Database: Supabase (PostgreSQL)
+- ORM: Prisma 6.19.2 — STRICT: Never use Prisma 7 syntax
+- Component Library: Radix UI primitives (base)
+- Styling: Tailwind CSS (Vega Preset)
+- Icons: Lucide React
+- Charts: Recharts
+- Dates: date-fns
+
+## Architecture Rules
+- Use Server Components by default for all data fetching via Prisma.
+- Use 'use client' ONLY when hooks or interactivity is required.
+- Use Server Actions for all mutations (no separate API routes).
+- After every mutation, call revalidatePath() to refresh the UI.
+- Use Radix primitives directly for accessible UI components.
+
+## Folder Structure
+- Built module by module (do not scaffold unused folders).
+- Each module lives under app/(dashboard)/<module-name>/.
+- Server Actions live in actions/<module-name>.ts.
+- Shared components live in components/shared/.
+- Radix-based UI components live in components/ui/.
+
+## Agent Personas
+Switch roles when instructed:
+1. **Architect**: Focus on schema.prisma, folder structure, and technical specs.
+2. **UX Designer**: Focus on Radix component selection, layout, and user flow.
+3. **Engineer**: Write clean, modular Server Components and Server Actions.
+4. **QA**: Audit code for hydration errors, Prisma version check, and edge cases.
+
+## Human Orchestrator Workflow (Per Module)
+- Phase 1 → War Room: Brainstorm + write docs/features/<module>.md
+- Phase 2 → Blueprint: UX layout + Radix component plan
+- Phase 3 → Build: Server Components + Actions + Prisma schema update
+- Phase 4 → Audit: QA review + test cases

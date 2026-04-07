@@ -1,0 +1,239 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum UnitOfMeasure {
+  KG
+  PIECE
+}
+
+enum LedgerEventType {
+  OPENING_STOCK
+  PRODUCTION
+  DISPATCH
+  ADJUSTMENT
+  DELETION_CLEANUP
+}
+
+enum WorkOrderStatus {
+  OPEN
+  COMPLETED
+  CANCELLED
+}
+
+enum EmploymentType {
+  PERMANENT
+  DAILY
+}
+
+enum EmployeeStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum AttendanceStatus {
+  PRESENT
+  ABSENT
+  HALF_DAY
+  LEAVE
+  HOLIDAY
+}
+
+enum LeaveType {
+  CASUAL
+  SICK
+  UNPAID
+  OTHER
+}
+
+model RawMaterial {
+  id                    String                   @id @default(cuid())
+  name                  String                   @unique
+  quantityInStock       Decimal                  @default(0) @db.Decimal(10, 2)
+  lastReceivedAt        DateTime?
+  lastReceivedQuantity  Decimal?                 @db.Decimal(10, 2)
+  createdAt             DateTime                 @default(now())
+  updatedAt             DateTime                 @updatedAt
+  ledgerEntries         RawMaterialLedger[]
+  workOrderRawMaterials WorkOrderRawMaterial[]
+}
+
+model FinishedProduct {
+  id                     String                 @id @default(cuid())
+  name                   String
+  unit                   UnitOfMeasure          @default(KG)
+  quantityInStock        Decimal                @default(0) @db.Decimal(10, 2)
+  weightPerPiece         Decimal?               @db.Decimal(10, 2) // Weight in grams. Only set when unit = PIECE and no variants.
+  isDeleted              Boolean                @default(false)
+  deletedAt              DateTime?
+  lastDispatchedAt       DateTime?
+  lastDispatchedQuantity Decimal?               @db.Decimal(10, 2)
+  createdAt              DateTime               @default(now())
+  updatedAt              DateTime               @updatedAt
+  ledgerEntries          FinishedProductLedger[]
+  workOrders             WorkOrder[]
+  variants               FinishedProductVariant[]
+
+  @@index([name])
+}
+
+model RawMaterialLedger {
+  id             String      @id @default(cuid())
+  rawMaterialId  String
+  rawMaterial    RawMaterial @relation(fields: [rawMaterialId], references: [id], onDelete: Cascade)
+  workOrderId    String?
+  date           DateTime    @default(now())
+  createdAt      DateTime    @default(now())
+  eventType      LedgerEventType @default(ADJUSTMENT)
+  openingBalance Decimal     @db.Decimal(10, 2)
+  quantityIn     Decimal     @db.Decimal(10, 2)
+  quantityOut    Decimal     @db.Decimal(10, 2)
+  closingBalance Decimal     @db.Decimal(10, 2)
+  notes          String?
+}
+
+model FinishedProductLedger {
+  id                 String          @id @default(cuid())
+  finishedProductId  String
+  finishedProduct    FinishedProduct @relation(fields: [finishedProductId], references: [id], onDelete: Cascade)
+  finishedProductVariantId String?
+  finishedProductVariant   FinishedProductVariant? @relation(fields: [finishedProductVariantId], references: [id])
+  workOrderId        String?
+  productionEntryId  String?
+  date               DateTime        @default(now())
+  createdAt          DateTime        @default(now())
+  eventType          LedgerEventType @default(PRODUCTION)
+  openingBalance     Decimal         @db.Decimal(10, 2)
+  quantityProduced   Decimal         @db.Decimal(10, 2)
+  quantityDispatched Decimal         @db.Decimal(10, 2)
+  closingBalance     Decimal         @db.Decimal(10, 2)
+  notes              String?
+}
+
+model FinishedProductVariant {
+  id                String                 @id @default(cuid())
+  finishedProductId String
+  finishedProduct   FinishedProduct        @relation(fields: [finishedProductId], references: [id], onDelete: Cascade)
+  name              String
+  weightInGrams     Decimal                @db.Decimal(10, 2)
+  quantityInStock   Decimal                @default(0) @db.Decimal(10, 2)
+  isDeleted         Boolean                @default(false)
+  deletedAt         DateTime?
+  createdAt         DateTime               @default(now())
+  updatedAt         DateTime               @updatedAt
+  ledgerEntries     FinishedProductLedger[]
+  workOrders        WorkOrder[]
+}
+
+model WorkOrder {
+  id                String                 @id @default(cuid())
+  workOrderName     String
+  finishedProductId String?
+  finishedProduct   FinishedProduct?       @relation(fields: [finishedProductId], references: [id])
+  finishedProductVariantId String?
+  finishedProductVariant   FinishedProductVariant? @relation(fields: [finishedProductVariantId], references: [id])
+  plannedQuantity   Decimal                @db.Decimal(10, 2)
+  status            WorkOrderStatus        @default(OPEN)
+  createdAt         DateTime               @default(now())
+  updatedAt         DateTime               @updatedAt
+  completedAt       DateTime?
+  rawMaterials      WorkOrderRawMaterial[]
+  productionEntries ProductionEntry[]
+}
+
+model WorkOrderRawMaterial {
+  id             String      @id @default(cuid())
+  workOrderId    String
+  workOrder      WorkOrder   @relation(fields: [workOrderId], references: [id], onDelete: Cascade)
+  rawMaterialId  String
+  rawMaterial    RawMaterial @relation(fields: [rawMaterialId], references: [id])
+  quantityIssued Decimal     @db.Decimal(10, 2)
+}
+
+model ProductionEntry {
+  id               String    @id @default(cuid())
+  workOrderId      String
+  workOrder        WorkOrder @relation(fields: [workOrderId], references: [id], onDelete: Cascade)
+  entryDate        DateTime  @default(now())
+  quantityProduced Decimal   @db.Decimal(10, 2)
+  wasteGenerated   Decimal   @default(0) @db.Decimal(10, 2)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+}
+
+model Department {
+  id          String     @id @default(cuid())
+  name        String
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  employees   Employee[]
+}
+
+model Employee {
+  id             String         @id @default(cuid())
+  name           String
+  phone          String?
+  employmentType EmploymentType
+  status         EmployeeStatus @default(ACTIVE)
+
+  // Salary fields — only one will be used based on employmentType
+  monthlySalary  Decimal?       @db.Decimal(10, 2)  // PERMANENT only
+  dailyWage      Decimal?       @db.Decimal(10, 2)  // DAILY only
+
+  hireDate       DateTime
+  departmentId   String
+  department     Department     @relation(fields: [departmentId], references: [id])
+
+  // Soft delete
+  isDeleted      Boolean        @default(false)
+  deletedAt      DateTime?
+
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  attendance     Attendance[]
+  leaves         Leave[]
+}
+
+model Attendance {
+  id              String           @id @default(cuid())
+  employeeId      String
+  employee        Employee         @relation(fields: [employeeId], references: [id])
+
+  date            DateTime         @db.Date
+  status          AttendanceStatus @default(PRESENT)
+
+  checkIn         DateTime?        // Full timestamp
+  checkOut        DateTime?        // Full timestamp
+  hoursWorked     Decimal?         @db.Decimal(4, 2)
+  overtimeHours   Decimal?         @db.Decimal(4, 2)
+
+  notes           String?
+
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  @@unique([employeeId, date])     // One record per employee per day
+}
+
+model Leave {
+  id          String    @id @default(cuid())
+  employeeId  String
+  employee    Employee  @relation(fields: [employeeId], references: [id])
+
+  leaveType   LeaveType
+  startDate   DateTime  @db.Date
+  endDate     DateTime  @db.Date
+  totalDays   Int
+  reason      String?
+  notes       String?
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
