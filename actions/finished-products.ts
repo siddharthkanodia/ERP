@@ -433,6 +433,229 @@ export async function dispatchFinishedProduct(formData: FormData) {
   redirect("/finished-products");
 }
 
+export type DispatchFinishedGoodsBatchInput = {
+  dispatchDate: string;
+  notes?: string;
+  items: Array<{
+    finishedGoodId: string;
+    quantity: number;
+  }>;
+};
+
+export async function dispatchFinishedGoodsBatch(
+  input: DispatchFinishedGoodsBatchInput
+): Promise<{ error: string } | void> {
+  const dispatchDate = new Date(input.dispatchDate);
+  const ledgerNotes = input.notes?.trim() ? input.notes.trim() : "Goods dispatched";
+
+  if (!input.items?.length) {
+    return { error: "Add at least one line." };
+  }
+  if (!input.dispatchDate || Number.isNaN(dispatchDate.getTime())) {
+    return { error: "Dispatch date is required." };
+  }
+  if (dispatchDate.getTime() > Date.now()) {
+    return { error: "Dispatch date cannot be in the future." };
+  }
+  if (input.notes !== undefined && input.notes.length > 500) {
+    return { error: "Notes must be at most 500 characters." };
+  }
+
+  for (const item of input.items) {
+    if (!item.finishedGoodId?.trim()) {
+      return { error: "Each line must have a finished good selected." };
+    }
+    if (!Number.isFinite(item.quantity) || item.quantity <= 0) {
+      return { error: "Quantity must be greater than 0 for all lines." };
+    }
+  }
+
+  type ParsedRow = {
+    productId: string;
+    variantId: string | null;
+    quantity: number;
+  };
+
+  const parsed: ParsedRow[] = [];
+
+  for (const item of input.items) {
+    const fid = item.finishedGoodId.trim();
+    if (fid.startsWith("p:")) {
+      const productId = fid.slice(2);
+      if (!productId) {
+        return { error: "Invalid line item." };
+      }
+      parsed.push({ productId, variantId: null, quantity: item.quantity });
+    } else if (fid.startsWith("v:")) {
+      const variantId = fid.slice(2);
+      if (!variantId) {
+        return { error: "Invalid line item." };
+      }
+      const v = await prisma.finishedProductVariant.findFirst({
+        where: {
+          id: variantId,
+          isDeleted: false,
+          finishedProduct: { isDeleted: false },
+        },
+        select: { finishedProductId: true },
+      });
+      if (!v) {
+        return { error: "One or more selected items are invalid." };
+      }
+      parsed.push({
+        productId: v.finishedProductId,
+        variantId,
+        quantity: item.quantity,
+      });
+    } else {
+      return { error: "Invalid line item." };
+    }
+  }
+
+  for (const row of parsed) {
+    const product = await prisma.finishedProduct.findFirst({
+      where: { id: row.productId, isDeleted: false },
+      include: {
+        variants: { where: { isDeleted: false }, select: { id: true, quantityInStock: true } },
+      },
+    });
+    if (!product) {
+      return { error: "Product not found." };
+    }
+
+    const hasVariants = product.variants.length > 0;
+    if (hasVariants && !row.variantId) {
+      return { error: "One or more products require a variant selection." };
+    }
+    if (!hasVariants && row.variantId) {
+      return { error: "Invalid line item." };
+    }
+
+    if (row.variantId) {
+      const sv = product.variants.find((v) => v.id === row.variantId);
+      if (!sv) {
+        return { error: "Invalid variant." };
+      }
+      const stock = Number(sv.quantityInStock);
+      if (row.quantity > stock) {
+        return { error: "Dispatch quantity cannot exceed available stock." };
+      }
+      if (product.unit === "PIECE" && !Number.isInteger(row.quantity)) {
+        return { error: "Pieces must be whole numbers." };
+      }
+    } else {
+      const stock = Number(product.quantityInStock);
+      if (row.quantity > stock) {
+        return { error: "Dispatch quantity cannot exceed available stock." };
+      }
+      if (product.unit === "PIECE" && !Number.isInteger(row.quantity)) {
+        return { error: "Pieces must be whole numbers." };
+      }
+    }
+  }
+
+  try {
+    await prisma.$transaction(async (tx) => {
+      for (const row of parsed) {
+        const product = await tx.finishedProduct.findFirstOrThrow({
+          where: { id: row.productId, isDeleted: false },
+          include: {
+            variants: { where: { isDeleted: false }, select: { id: true, quantityInStock: true } },
+          },
+        });
+
+        const selectedVariant = row.variantId
+          ? product.variants.find((v) => v.id === row.variantId) ?? null
+          : null;
+        if (row.variantId && !selectedVariant) {
+          throw Object.assign(new Error("Not found"), { code: "P2025" });
+        }
+
+        const openingBalance = selectedVariant
+          ? Number(selectedVariant.quantityInStock)
+          : Number(product.quantityInStock);
+        const closingBalance = openingBalance - row.quantity;
+
+        if (selectedVariant) {
+          const updated = await tx.finishedProductVariant.updateMany({
+            where: {
+              id: selectedVariant.id,
+              finishedProductId: row.productId,
+              quantityInStock: { gte: row.quantity },
+            },
+            data: { quantityInStock: { decrement: row.quantity } },
+          });
+          if (updated.count !== 1) {
+            throw Object.assign(new Error("Insufficient stock"), {
+              code: "INSUFFICIENT_STOCK",
+            });
+          }
+        } else {
+          const updated = await tx.finishedProduct.updateMany({
+            where: { id: row.productId, quantityInStock: { gte: row.quantity } },
+            data: { quantityInStock: { decrement: row.quantity } },
+          });
+          if (updated.count !== 1) {
+            throw Object.assign(new Error("Insufficient stock"), {
+              code: "INSUFFICIENT_STOCK",
+            });
+          }
+        }
+
+        await tx.finishedProduct.update({
+          where: { id: row.productId },
+          data: {
+            lastDispatchedAt: dispatchDate,
+            lastDispatchedQuantity: row.quantity,
+          },
+        });
+
+        await tx.finishedProductLedger.create({
+          data: {
+            finishedProductId: row.productId,
+            finishedProductVariantId: selectedVariant?.id ?? null,
+            date: dispatchDate,
+            eventType: "DISPATCH",
+            openingBalance,
+            quantityProduced: 0,
+            quantityDispatched: row.quantity,
+            closingBalance,
+            notes: ledgerNotes,
+          },
+        });
+
+        await rebuildFinishedProductLedgerBalances(
+          row.productId,
+          tx,
+          selectedVariant?.id ?? null
+        );
+      }
+    });
+  } catch (error: unknown) {
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      (error as { code: string }).code === "INSUFFICIENT_STOCK"
+    ) {
+      return { error: "Dispatch quantity cannot exceed available stock." };
+    }
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      (error as { code: string }).code === "P2025"
+    ) {
+      return { error: "Product not found." };
+    }
+    return { error: "Failed to dispatch stock." };
+  }
+
+  revalidatePath("/finished-products");
+  revalidatePath("/finished-products/dispatch");
+  redirect("/finished-products");
+}
+
 export async function getAllFinishedProducts() {
   const products = await prisma.finishedProduct.findMany({
     where: { isDeleted: false },

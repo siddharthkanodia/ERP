@@ -15,6 +15,7 @@ enum UnitOfMeasure {
 
 enum LedgerEventType {
   OPENING_STOCK
+  RECEIPT
   PRODUCTION
   DISPATCH
   ADJUSTMENT

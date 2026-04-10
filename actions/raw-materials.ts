@@ -1,5 +1,6 @@
 "use server";
 
+import { LedgerEventType } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
@@ -86,6 +87,7 @@ export async function receiveRawMaterial(formData: FormData) {
         data: {
           rawMaterialId: id,
           date: receivedDate,
+          eventType: LedgerEventType.RECEIPT,
           openingBalance,
           quantityIn: quantity,
           quantityOut: 0,
@@ -108,6 +110,94 @@ export async function receiveRawMaterial(formData: FormData) {
   }
 
   revalidatePath("/raw-materials");
+  redirect("/raw-materials");
+}
+
+export type ReceiveStockBatchInput = {
+  receivedDate: string;
+  notes?: string;
+  items: Array<{
+    materialId: string;
+    quantity: number;
+  }>;
+};
+
+export async function receiveStockBatch(
+  input: ReceiveStockBatchInput
+): Promise<{ error: string } | void> {
+  const receivedDate = new Date(input.receivedDate);
+
+  if (!input.items?.length) {
+    return { error: "Add at least one material line." };
+  }
+  if (!input.receivedDate || Number.isNaN(receivedDate.getTime())) {
+    return { error: "Received date is required." };
+  }
+  if (receivedDate.getTime() > Date.now()) {
+    return { error: "Received date cannot be in the future." };
+  }
+  if (input.notes !== undefined && input.notes.length > 500) {
+    return { error: "Notes must be at most 500 characters." };
+  }
+
+  for (const item of input.items) {
+    if (!item.materialId?.trim()) {
+      return { error: "Each item must have a valid raw material." };
+    }
+    if (!Number.isFinite(item.quantity) || item.quantity <= 0) {
+      return { error: "Quantity must be greater than 0 for all items." };
+    }
+  }
+
+  const ledgerNotes = input.notes?.trim() ? input.notes.trim() : "Stock received";
+
+  try {
+    await prisma.$transaction(async (tx) => {
+      for (const item of input.items) {
+        const material = await tx.rawMaterial.findUniqueOrThrow({
+          where: { id: item.materialId },
+        });
+
+        const opening = Number(material.quantityInStock);
+        const closing = opening + item.quantity;
+
+        await tx.rawMaterial.update({
+          where: { id: item.materialId },
+          data: {
+            quantityInStock: closing,
+            lastReceivedAt: receivedDate,
+            lastReceivedQuantity: item.quantity,
+          },
+        });
+
+        await tx.rawMaterialLedger.create({
+          data: {
+            rawMaterialId: item.materialId,
+            date: receivedDate,
+            eventType: LedgerEventType.RECEIPT,
+            openingBalance: opening,
+            quantityIn: item.quantity,
+            quantityOut: 0,
+            closingBalance: closing,
+            notes: ledgerNotes,
+          },
+        });
+      }
+    });
+  } catch (error: unknown) {
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      (error as { code: string }).code === "P2025"
+    ) {
+      return { error: "One or more raw materials no longer exist." };
+    }
+    return { error: "Failed to receive stock." };
+  }
+
+  revalidatePath("/raw-materials");
+  revalidatePath("/raw-materials/receive");
   redirect("/raw-materials");
 }
 
