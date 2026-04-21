@@ -8,6 +8,10 @@ datasource db {
   directUrl = env("DIRECT_URL")
 }
 
+// ─────────────────────────────────────────────
+// Domain enums
+// ─────────────────────────────────────────────
+
 enum UnitOfMeasure {
   KG
   PIECE
@@ -53,112 +57,214 @@ enum LeaveType {
   OTHER
 }
 
+// ─────────────────────────────────────────────
+// Platform / tenancy enums
+// ─────────────────────────────────────────────
+
+enum GlobalRole {
+  SUPER_ADMIN
+  USER
+}
+
+enum CompanyRole {
+  ADMIN
+  MANAGER
+  OPERATOR
+}
+
+// ─────────────────────────────────────────────
+// Platform / tenancy models
+// ─────────────────────────────────────────────
+
+model Company {
+  id        String   @id @default(cuid())
+  name      String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  memberships             CompanyMembership[]
+  rawMaterials            RawMaterial[]
+  finishedProducts        FinishedProduct[]
+  finishedProductVariants FinishedProductVariant[]
+  rawMaterialLedgers      RawMaterialLedger[]
+  finishedProductLedgers  FinishedProductLedger[]
+  workOrders              WorkOrder[]
+  workOrderRawMaterials   WorkOrderRawMaterial[]
+  productionEntries       ProductionEntry[]
+  departments             Department[]
+  employees               Employee[]
+  attendance              Attendance[]
+  leaves                  Leave[]
+}
+
+model User {
+  id             String     @id @default(cuid())
+  email          String     @unique
+  supabaseUserId String     @unique
+  globalRole     GlobalRole @default(USER)
+  isActive       Boolean    @default(true)
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  memberships CompanyMembership[]
+}
+
+model CompanyMembership {
+  id        String      @id @default(cuid())
+  companyId String
+  userId    String
+  role      CompanyRole
+  createdAt DateTime    @default(now())
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@unique([companyId, userId])
+  @@index([companyId])
+  @@index([userId])
+}
+
+// ─────────────────────────────────────────────
+// Tenant / business models
+// ─────────────────────────────────────────────
+
 model RawMaterial {
-  id                    String                   @id @default(cuid())
-  name                  String                   @unique
-  quantityInStock       Decimal                  @default(0) @db.Decimal(10, 2)
+  id                    String                 @id @default(cuid())
+  companyId             String
+  company               Company                @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  name                  String
+  quantityInStock       Decimal                @default(0) @db.Decimal(10, 2)
   lastReceivedAt        DateTime?
-  lastReceivedQuantity  Decimal?                 @db.Decimal(10, 2)
-  createdAt             DateTime                 @default(now())
-  updatedAt             DateTime                 @updatedAt
+  lastReceivedQuantity  Decimal?               @db.Decimal(10, 2)
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
   ledgerEntries         RawMaterialLedger[]
   workOrderRawMaterials WorkOrderRawMaterial[]
+
+  @@unique([companyId, name])
+  @@index([companyId])
 }
 
 model FinishedProduct {
-  id                     String                 @id @default(cuid())
+  id                     String                   @id @default(cuid())
+  companyId              String
+  company                Company                  @relation(fields: [companyId], references: [id], onDelete: Restrict)
   name                   String
-  unit                   UnitOfMeasure          @default(KG)
-  quantityInStock        Decimal                @default(0) @db.Decimal(10, 2)
-  weightPerPiece         Decimal?               @db.Decimal(10, 2) // Weight in grams. Only set when unit = PIECE and no variants.
-  isDeleted              Boolean                @default(false)
+  unit                   UnitOfMeasure            @default(KG)
+  quantityInStock        Decimal                  @default(0) @db.Decimal(10, 2)
+  weightPerPiece         Decimal?                 @db.Decimal(10, 2) // Weight in grams. Only set when unit = PIECE and no variants.
+  isDeleted              Boolean                  @default(false)
   deletedAt              DateTime?
   lastDispatchedAt       DateTime?
-  lastDispatchedQuantity Decimal?               @db.Decimal(10, 2)
-  createdAt              DateTime               @default(now())
-  updatedAt              DateTime               @updatedAt
+  lastDispatchedQuantity Decimal?                 @db.Decimal(10, 2)
+  createdAt              DateTime                 @default(now())
+  updatedAt              DateTime                 @updatedAt
   ledgerEntries          FinishedProductLedger[]
   workOrders             WorkOrder[]
   variants               FinishedProductVariant[]
 
+  @@index([companyId])
   @@index([name])
 }
 
 model RawMaterialLedger {
-  id             String      @id @default(cuid())
+  id             String          @id @default(cuid())
+  companyId      String
+  company        Company         @relation(fields: [companyId], references: [id], onDelete: Restrict)
   rawMaterialId  String
-  rawMaterial    RawMaterial @relation(fields: [rawMaterialId], references: [id], onDelete: Cascade)
+  rawMaterial    RawMaterial     @relation(fields: [rawMaterialId], references: [id], onDelete: Cascade)
   workOrderId    String?
-  date           DateTime    @default(now())
-  createdAt      DateTime    @default(now())
+  date           DateTime        @default(now())
+  createdAt      DateTime        @default(now())
   eventType      LedgerEventType @default(ADJUSTMENT)
-  openingBalance Decimal     @db.Decimal(10, 2)
-  quantityIn     Decimal     @db.Decimal(10, 2)
-  quantityOut    Decimal     @db.Decimal(10, 2)
-  closingBalance Decimal     @db.Decimal(10, 2)
+  openingBalance Decimal         @db.Decimal(10, 2)
+  quantityIn     Decimal         @db.Decimal(10, 2)
+  quantityOut    Decimal         @db.Decimal(10, 2)
+  closingBalance Decimal         @db.Decimal(10, 2)
   notes          String?
+
+  @@index([companyId])
 }
 
 model FinishedProductLedger {
-  id                 String          @id @default(cuid())
-  finishedProductId  String
-  finishedProduct    FinishedProduct @relation(fields: [finishedProductId], references: [id], onDelete: Cascade)
+  id                       String                  @id @default(cuid())
+  companyId                String
+  company                  Company                 @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  finishedProductId        String
+  finishedProduct          FinishedProduct         @relation(fields: [finishedProductId], references: [id], onDelete: Cascade)
   finishedProductVariantId String?
   finishedProductVariant   FinishedProductVariant? @relation(fields: [finishedProductVariantId], references: [id])
-  workOrderId        String?
-  productionEntryId  String?
-  date               DateTime        @default(now())
-  createdAt          DateTime        @default(now())
-  eventType          LedgerEventType @default(PRODUCTION)
-  openingBalance     Decimal         @db.Decimal(10, 2)
-  quantityProduced   Decimal         @db.Decimal(10, 2)
-  quantityDispatched Decimal         @db.Decimal(10, 2)
-  closingBalance     Decimal         @db.Decimal(10, 2)
-  notes              String?
+  workOrderId              String?
+  productionEntryId        String?
+  date                     DateTime                @default(now())
+  createdAt                DateTime                @default(now())
+  eventType                LedgerEventType         @default(PRODUCTION)
+  openingBalance           Decimal                 @db.Decimal(10, 2)
+  quantityProduced         Decimal                 @db.Decimal(10, 2)
+  quantityDispatched       Decimal                 @db.Decimal(10, 2)
+  closingBalance           Decimal                 @db.Decimal(10, 2)
+  notes                    String?
+
+  @@index([companyId])
 }
 
 model FinishedProductVariant {
-  id                String                 @id @default(cuid())
+  id                String                  @id @default(cuid())
+  companyId         String
+  company           Company                 @relation(fields: [companyId], references: [id], onDelete: Restrict)
   finishedProductId String
-  finishedProduct   FinishedProduct        @relation(fields: [finishedProductId], references: [id], onDelete: Cascade)
+  finishedProduct   FinishedProduct         @relation(fields: [finishedProductId], references: [id], onDelete: Cascade)
   name              String
-  weightInGrams     Decimal                @db.Decimal(10, 2)
-  quantityInStock   Decimal                @default(0) @db.Decimal(10, 2)
-  isDeleted         Boolean                @default(false)
+  weightInGrams     Decimal                 @db.Decimal(10, 2)
+  quantityInStock   Decimal                 @default(0) @db.Decimal(10, 2)
+  isDeleted         Boolean                 @default(false)
   deletedAt         DateTime?
-  createdAt         DateTime               @default(now())
-  updatedAt         DateTime               @updatedAt
+  createdAt         DateTime                @default(now())
+  updatedAt         DateTime                @updatedAt
   ledgerEntries     FinishedProductLedger[]
   workOrders        WorkOrder[]
+
+  @@index([companyId])
 }
 
 model WorkOrder {
-  id                String                 @id @default(cuid())
-  workOrderName     String
-  finishedProductId String?
-  finishedProduct   FinishedProduct?       @relation(fields: [finishedProductId], references: [id])
+  id                       String                  @id @default(cuid())
+  companyId                String
+  company                  Company                 @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  workOrderName            String
+  finishedProductId        String?
+  finishedProduct          FinishedProduct?        @relation(fields: [finishedProductId], references: [id])
   finishedProductVariantId String?
   finishedProductVariant   FinishedProductVariant? @relation(fields: [finishedProductVariantId], references: [id])
-  plannedQuantity   Decimal                @db.Decimal(10, 2)
-  status            WorkOrderStatus        @default(OPEN)
-  createdAt         DateTime               @default(now())
-  updatedAt         DateTime               @updatedAt
-  completedAt       DateTime?
-  rawMaterials      WorkOrderRawMaterial[]
-  productionEntries ProductionEntry[]
+  plannedQuantity          Decimal                 @db.Decimal(10, 2)
+  status                   WorkOrderStatus         @default(OPEN)
+  createdAt                DateTime                @default(now())
+  updatedAt                DateTime                @updatedAt
+  completedAt              DateTime?
+  rawMaterials             WorkOrderRawMaterial[]
+  productionEntries        ProductionEntry[]
+
+  @@index([companyId])
 }
 
 model WorkOrderRawMaterial {
   id             String      @id @default(cuid())
+  companyId      String
+  company        Company     @relation(fields: [companyId], references: [id], onDelete: Restrict)
   workOrderId    String
   workOrder      WorkOrder   @relation(fields: [workOrderId], references: [id], onDelete: Cascade)
   rawMaterialId  String
   rawMaterial    RawMaterial @relation(fields: [rawMaterialId], references: [id])
   quantityIssued Decimal     @db.Decimal(10, 2)
+
+  @@index([companyId])
 }
 
 model ProductionEntry {
   id               String    @id @default(cuid())
+  companyId        String
+  company          Company   @relation(fields: [companyId], references: [id], onDelete: Restrict)
   workOrderId      String
   workOrder        WorkOrder @relation(fields: [workOrderId], references: [id], onDelete: Cascade)
   entryDate        DateTime  @default(now())
@@ -166,75 +272,92 @@ model ProductionEntry {
   wasteGenerated   Decimal   @default(0) @db.Decimal(10, 2)
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
+
+  @@index([companyId])
 }
 
 model Department {
-  id          String     @id @default(cuid())
-  name        String
-  createdAt   DateTime   @default(now())
-  updatedAt   DateTime   @updatedAt
-  employees   Employee[]
+  id        String     @id @default(cuid())
+  companyId String
+  company   Company    @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  name      String
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  employees Employee[]
+
+  @@index([companyId])
 }
 
 model Employee {
   id             String         @id @default(cuid())
+  companyId      String
+  company        Company        @relation(fields: [companyId], references: [id], onDelete: Restrict)
   name           String
   phone          String?
   employmentType EmploymentType
   status         EmployeeStatus @default(ACTIVE)
 
   // Salary fields — only one will be used based on employmentType
-  monthlySalary  Decimal?       @db.Decimal(10, 2)  // PERMANENT only
-  dailyWage      Decimal?       @db.Decimal(10, 2)  // DAILY only
+  monthlySalary Decimal? @db.Decimal(10, 2) // PERMANENT only
+  dailyWage     Decimal? @db.Decimal(10, 2) // DAILY only
 
-  hireDate       DateTime
-  departmentId   String
-  department     Department     @relation(fields: [departmentId], references: [id])
+  hireDate     DateTime
+  departmentId String
+  department   Department @relation(fields: [departmentId], references: [id])
 
   // Soft delete
-  isDeleted      Boolean        @default(false)
-  deletedAt      DateTime?
+  isDeleted Boolean   @default(false)
+  deletedAt DateTime?
 
-  createdAt      DateTime       @default(now())
-  updatedAt      DateTime       @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  attendance     Attendance[]
-  leaves         Leave[]
+  attendance Attendance[]
+  leaves     Leave[]
+
+  @@index([companyId])
 }
 
 model Attendance {
-  id              String           @id @default(cuid())
-  employeeId      String
-  employee        Employee         @relation(fields: [employeeId], references: [id])
+  id         String   @id @default(cuid())
+  companyId  String
+  company    Company  @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id])
 
-  date            DateTime         @db.Date
-  status          AttendanceStatus @default(PRESENT)
+  date   DateTime         @db.Date
+  status AttendanceStatus @default(PRESENT)
 
-  checkIn         DateTime?        // Full timestamp
-  checkOut        DateTime?        // Full timestamp
-  hoursWorked     Decimal?         @db.Decimal(4, 2)
-  overtimeHours   Decimal?         @db.Decimal(4, 2)
+  checkIn       DateTime? // Full timestamp
+  checkOut      DateTime? // Full timestamp
+  hoursWorked   Decimal?  @db.Decimal(4, 2)
+  overtimeHours Decimal?  @db.Decimal(4, 2)
 
-  notes           String?
+  notes String?
 
-  createdAt       DateTime         @default(now())
-  updatedAt       DateTime         @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  @@unique([employeeId, date])     // One record per employee per day
+  @@unique([employeeId, date]) // One record per employee per day
+  @@index([companyId])
 }
 
 model Leave {
-  id          String    @id @default(cuid())
-  employeeId  String
-  employee    Employee  @relation(fields: [employeeId], references: [id])
+  id         String   @id @default(cuid())
+  companyId  String
+  company    Company  @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id])
 
-  leaveType   LeaveType
-  startDate   DateTime  @db.Date
-  endDate     DateTime  @db.Date
-  totalDays   Int
-  reason      String?
-  notes       String?
+  leaveType LeaveType
+  startDate DateTime  @db.Date
+  endDate   DateTime  @db.Date
+  totalDays Int
+  reason    String?
+  notes     String?
 
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId])
 }
