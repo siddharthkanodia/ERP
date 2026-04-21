@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 
 import { getWorkOrderById } from "@/actions/production";
 import { getAllRawMaterials } from "@/actions/raw-materials";
+import { getFloorStockForRawMaterials } from "@/actions/production-floor";
 
 import { AddProductionEntryForm } from "./add-production-entry-form";
 import { EditWorkOrderForm } from "./edit-work-order-form";
@@ -24,22 +25,27 @@ export default async function WorkOrderDetailPage({
 
   if (!workOrder) redirect("/production");
 
-  const rawMaterials = await getAllRawMaterials();
-  const unitLabel = workOrder.finishedProductUnit === "PIECE" ? "pcs" : "kg";
-  const totalProduced = workOrder.totalProduced;
-  const totalWaste = workOrder.productionEntries.reduce(
-    (sum, e) => sum + e.wasteGenerated,
-    0
+  const allRawMaterials = await getAllRawMaterials();
+  const floorStocks = await getFloorStockForRawMaterials(
+    allRawMaterials.map((m) => m.id)
   );
-  const remaining = workOrder.plannedQuantity - totalProduced;
+  const floorStockById = new Map(
+    floorStocks.map((f) => [f.rawMaterialId, f.floorStock])
+  );
+  const unitLabel = workOrder.finishedProductUnit === "PIECE" ? "pcs" : "kg";
+
+  const selectedFloorStock = workOrder.rawMaterials.map((rm) => ({
+    rawMaterialId: rm.rawMaterialId,
+    name: rm.name,
+    floorStock: floorStockById.get(rm.rawMaterialId) ?? 0,
+  }));
+  const zeroStockMaterials = selectedFloorStock.filter((m) => m.floorStock <= 0);
 
   return (
     <section className="mx-auto w-full max-w-7xl space-y-4 px-4 py-6 sm:px-6">
       <header className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">
-            {workOrder.workOrderName || "Untitled Work Order"}
-          </h1>
+          <h1 className="text-2xl font-bold tracking-tight">{workOrder.workOrderName}</h1>
           <p
             className={`text-sm ${
               workOrder.finishedProductName === "<Deleted Product>"
@@ -76,38 +82,82 @@ export default async function WorkOrderDetailPage({
           finishedProductName: workOrder.finishedProductName,
           finishedProductVariantName: workOrder.finishedProductVariantName,
           rawMaterials: workOrder.rawMaterials.map((rm) => ({
-            id: rm.id,
             rawMaterialId: rm.rawMaterialId,
             name: rm.name,
-            quantityIssued: rm.quantityIssued,
           })),
         }}
-        availableStocks={rawMaterials.map((m) => ({
-          rawMaterialId: m.id,
-          quantityInStock: m.quantityInStock,
+        rawMaterials={allRawMaterials.map((m) => ({
+          id: m.id,
+          name: m.name,
+          floorStock: floorStockById.get(m.id) ?? 0,
         }))}
       />
 
-      <div className="grid gap-2 rounded-md border bg-card p-3 text-sm md:grid-cols-3">
+      <div className="grid gap-2 rounded-md border bg-card p-3 text-sm md:grid-cols-4">
         <div>
-          <p className="text-muted-foreground">Total Produced</p>
+          <p className="text-muted-foreground">Planned Qty</p>
           <p className="font-medium">
-            {totalProduced} {unitLabel}
+            {workOrder.plannedQuantity} {unitLabel}
           </p>
         </div>
         <div>
-          <p className="text-muted-foreground">Total Waste (kg)</p>
+          <p className="text-muted-foreground">Actual Qty</p>
           <p className="font-medium">
-            {totalWaste} kg
+            {workOrder.totalProduced} {unitLabel}
           </p>
         </div>
         <div>
-          <p className="text-muted-foreground">Remaining vs Plan</p>
-          <p className={`font-medium ${remaining < 0 ? "text-red-600" : ""}`}>
-            {remaining} {unitLabel}
+          <p className="text-muted-foreground">Variance</p>
+          <p className={`font-medium ${workOrder.variance < 0 ? "text-red-600" : "text-emerald-700"}`}>
+            {workOrder.variance} {unitLabel}
           </p>
+        </div>
+        <div>
+          <p className="text-muted-foreground">Total RM Consumed</p>
+          <p className="font-medium">{workOrder.totalConsumptionKg} kg</p>
         </div>
       </div>
+
+      <div className="rounded-md border bg-card p-3 text-sm">
+        <p className="mb-1 text-muted-foreground">Raw Material Types Used</p>
+        <p className="font-medium">
+          {workOrder.rawMaterials.map((m) => m.name).join(", ") || "-"}
+        </p>
+      </div>
+
+      {selectedFloorStock.length > 0 ? (
+        <div className="rounded-md border bg-card p-3 text-sm">
+          <div className="mb-2 flex items-center justify-between">
+            <p className="text-muted-foreground">Floor Stock (selected materials)</p>
+            <Link
+              href="/production-floor/issue"
+              className="text-xs font-medium text-foreground underline-offset-2 hover:underline"
+            >
+              Issue to floor
+            </Link>
+          </div>
+          <ul className="grid gap-1 md:grid-cols-2">
+            {selectedFloorStock.map((m) => (
+              <li key={m.rawMaterialId} className="flex items-center justify-between gap-2">
+                <span>{m.name}</span>
+                <span
+                  className={`tabular-nums ${
+                    m.floorStock <= 0 ? "font-medium text-amber-600" : "font-medium"
+                  }`}
+                >
+                  {m.floorStock.toFixed(2)} kg
+                </span>
+              </li>
+            ))}
+          </ul>
+          {zeroStockMaterials.length > 0 ? (
+            <p className="mt-2 text-xs font-medium text-amber-600">
+              Warning: {zeroStockMaterials.map((m) => m.name).join(", ")} has 0 floor stock.
+              Issue stock to the production floor before producing.
+            </p>
+          ) : null}
+        </div>
+      ) : null}
 
       <AddProductionEntryForm
         workOrderId={workOrder.id}
@@ -122,4 +172,3 @@ export default async function WorkOrderDetailPage({
     </section>
   );
 }
-

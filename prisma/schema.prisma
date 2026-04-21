@@ -53,6 +53,12 @@ enum LeaveType {
   OTHER
 }
 
+enum ProductionFloorEventType {
+  ISSUE
+  CONSUME
+  ADJUSTMENT
+}
+
 model RawMaterial {
   id                    String                   @id @default(cuid())
   name                  String                   @unique
@@ -63,12 +69,42 @@ model RawMaterial {
   updatedAt             DateTime                 @updatedAt
   ledgerEntries         RawMaterialLedger[]
   workOrderRawMaterials WorkOrderRawMaterial[]
+  productionFloorStock  ProductionFloorStock?
+  productionFloorLedger ProductionFloorLedger[]
+}
+
+model ProductionFloorStock {
+  id               String      @id @default(cuid())
+  rawMaterialId    String      @unique
+  rawMaterial      RawMaterial @relation(fields: [rawMaterialId], references: [id], onDelete: Cascade)
+  quantityInStock  Decimal     @default(0) @db.Decimal(10, 2)
+  lastIssuedAt     DateTime?
+  lastConsumedAt   DateTime?
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+}
+
+model ProductionFloorLedger {
+  id             String                   @id @default(cuid())
+  rawMaterialId  String
+  rawMaterial    RawMaterial              @relation(fields: [rawMaterialId], references: [id], onDelete: Cascade)
+  date           DateTime                 @default(now())
+  eventType      ProductionFloorEventType
+  openingBalance Decimal                  @db.Decimal(10, 2)
+  quantityIn     Decimal                  @db.Decimal(10, 2)
+  quantityOut    Decimal                  @db.Decimal(10, 2)
+  closingBalance Decimal                  @db.Decimal(10, 2)
+  notes          String?
+  createdAt      DateTime                 @default(now())
+
+  @@index([rawMaterialId, date])
 }
 
 model FinishedProduct {
   id                     String                 @id @default(cuid())
   name                   String
   unit                   UnitOfMeasure          @default(KG)
+  isWaste                Boolean                @default(false)
   quantityInStock        Decimal                @default(0) @db.Decimal(10, 2)
   weightPerPiece         Decimal?               @db.Decimal(10, 2) // Weight in grams. Only set when unit = PIECE and no variants.
   isDeleted              Boolean                @default(false)
@@ -154,7 +190,8 @@ model WorkOrderRawMaterial {
   workOrder      WorkOrder   @relation(fields: [workOrderId], references: [id], onDelete: Cascade)
   rawMaterialId  String
   rawMaterial    RawMaterial @relation(fields: [rawMaterialId], references: [id])
-  quantityIssued Decimal     @db.Decimal(10, 2)
+
+  @@unique([workOrderId, rawMaterialId])
 }
 
 model ProductionEntry {
@@ -163,7 +200,6 @@ model ProductionEntry {
   workOrder        WorkOrder @relation(fields: [workOrderId], references: [id], onDelete: Cascade)
   entryDate        DateTime  @default(now())
   quantityProduced Decimal   @db.Decimal(10, 2)
-  wasteGenerated   Decimal   @default(0) @db.Decimal(10, 2)
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 }

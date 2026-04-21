@@ -13,13 +13,13 @@ export default async function ProductionPage() {
     <section className="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6">
       <header className="mb-5 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-xl font-semibold tracking-tight">Production</h1>
+          <h1 className="text-xl font-semibold tracking-tight">Work Orders</h1>
           <p className="text-sm text-muted-foreground">
             Track work orders and production progress.
           </p>
         </div>
         <Link href="/production/new" className={primaryButton}>
-          Generate Work Order
+          Create Work Order
         </Link>
       </header>
 

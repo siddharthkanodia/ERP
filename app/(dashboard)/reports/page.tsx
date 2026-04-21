@@ -43,6 +43,29 @@ export default function ReportsDashboardPage() {
               <Boxes className="size-5" />
             </div>
             <div className="space-y-1">
+              <h2 className="text-sm font-semibold">Production Floor Report</h2>
+              <p className="text-sm text-muted-foreground">
+                Date-wise opening, issued, consumed, adjusted and closing for floor stock.
+              </p>
+            </div>
+          </div>
+
+          <div className="mt-4">
+            <Button
+              asChild
+              className="w-full bg-black text-white hover:bg-black/90"
+            >
+              <Link href="/reports/production-floor">View Report</Link>
+            </Button>
+          </div>
+        </div>
+
+        <div className="rounded-md border bg-card p-5">
+          <div className="flex items-start gap-3">
+            <div className="rounded-md border bg-background p-2">
+              <Boxes className="size-5" />
+            </div>
+            <div className="space-y-1">
               <h2 className="text-sm font-semibold">Raw Material Report</h2>
               <p className="text-sm text-muted-foreground">
                 Daily breakdown of opening balance, received, issued, and closing balance.

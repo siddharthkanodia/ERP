@@ -7,9 +7,11 @@ import { useMemo, useState } from "react";
 
 type WorkOrderRow = {
   id: string;
-  workOrderName?: string | null;
+  workOrderName: string;
   plannedQuantity: number;
   totalProduced: number;
+  variance: number;
+  totalConsumptionKg: number;
   status: "OPEN" | "COMPLETED" | "CANCELLED";
   createdAt: Date;
   finishedProductName: string;
@@ -26,6 +28,8 @@ type SortKey =
   | "variant"
   | "plannedQuantity"
   | "totalProduced"
+  | "variance"
+  | "consumption"
   | "rawMaterials"
   | "status"
   | "createdAt";
@@ -52,7 +56,7 @@ export function ProductionTable({ workOrders }: { workOrders: WorkOrderRow[] }) 
     if (!q) return workOrders;
 
     return workOrders.filter((wo) => {
-      const name = (wo.workOrderName || "Untitled Work Order").toLowerCase();
+      const name = wo.workOrderName.toLowerCase();
       const product = wo.finishedProductName.toLowerCase();
       return name.includes(q) || product.includes(q);
     });
@@ -75,9 +79,7 @@ export function ProductionTable({ workOrders }: { workOrders: WorkOrderRow[] }) 
       let delta = 0;
       switch (sortKey) {
         case "workOrderName":
-          delta = (a.workOrderName || "Untitled Work Order").localeCompare(
-            b.workOrderName || "Untitled Work Order"
-          );
+          delta = a.workOrderName.localeCompare(b.workOrderName);
           break;
         case "finishedProduct":
           delta = a.finishedProductName.localeCompare(b.finishedProductName);
@@ -92,6 +94,12 @@ export function ProductionTable({ workOrders }: { workOrders: WorkOrderRow[] }) 
           break;
         case "totalProduced":
           delta = a.totalProduced - b.totalProduced;
+          break;
+        case "variance":
+          delta = a.variance - b.variance;
+          break;
+        case "consumption":
+          delta = a.totalConsumptionKg - b.totalConsumptionKg;
           break;
         case "rawMaterials": {
           const aNames = a.rawMaterials.map((rm) => rm.name).join(", ");
@@ -182,13 +190,25 @@ export function ProductionTable({ workOrders }: { workOrders: WorkOrderRow[] }) 
                 </th>
                 <th className="px-3 py-2 text-right">
                   <button type="button" className={thButtonClass} onClick={() => onSort("totalProduced")}>
-                    Total Produced
+                    Actual Qty
+                    <ArrowUpDown className="size-3.5" />
+                  </button>
+                </th>
+                <th className="px-3 py-2 text-right">
+                  <button type="button" className={thButtonClass} onClick={() => onSort("variance")}>
+                    Variance
+                    <ArrowUpDown className="size-3.5" />
+                  </button>
+                </th>
+                <th className="px-3 py-2 text-right">
+                  <button type="button" className={thButtonClass} onClick={() => onSort("consumption")}>
+                    RM Consumption
                     <ArrowUpDown className="size-3.5" />
                   </button>
                 </th>
                 <th className="px-3 py-2">
                   <button type="button" className={thButtonClass} onClick={() => onSort("rawMaterials")}>
-                    Raw Materials
+                    Raw Material Types
                     <ArrowUpDown className="size-3.5" />
                   </button>
                 </th>
@@ -214,7 +234,7 @@ export function ProductionTable({ workOrders }: { workOrders: WorkOrderRow[] }) 
                   <tr key={wo.id} className="border-b last:border-b-0 hover:bg-muted/30">
                     <td className="px-3 py-2">
                       <Link href={`/production/${wo.id}`} className="hover:underline">
-                        {wo.workOrderName || "Untitled Work Order"}
+                        {wo.workOrderName}
                       </Link>
                     </td>
                     <td className="px-3 py-2">
@@ -241,6 +261,16 @@ export function ProductionTable({ workOrders }: { workOrders: WorkOrderRow[] }) 
                     <td className="px-3 py-2 text-right tabular-nums">
                       <Link href={`/production/${wo.id}`} className="hover:underline">
                         {wo.totalProduced} {unit}
+                      </Link>
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums">
+                      <Link href={`/production/${wo.id}`} className="hover:underline">
+                        {wo.variance} {unit}
+                      </Link>
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums">
+                      <Link href={`/production/${wo.id}`} className="hover:underline">
+                        {wo.totalConsumptionKg} kg
                       </Link>
                     </td>
                     <td className="px-3 py-2">
@@ -272,4 +302,3 @@ export function ProductionTable({ workOrders }: { workOrders: WorkOrderRow[] }) 
     </div>
   );
 }
-

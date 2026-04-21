@@ -9,6 +9,7 @@ import {
   Users,
   ClipboardList,
   BarChart3,
+  Boxes,
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -20,14 +21,20 @@ const navItems = [
     Icon: Database,
   },
   {
-    label: "Finished Products",
-    href: "/finished-products",
-    Icon: PackageCheck,
+    label: "Production Floor",
+    href: "/production-floor",
+    Icon: Boxes,
   },
   {
-    label: "Production",
+    label: "Work Orders",
     href: "/production",
     Icon: Factory,
+  },
+  {
+    label: "Finished Goods",
+    href: "/finished-products",
+    Icon: PackageCheck,
+    children: [{ label: "Waste", href: "/finished-products/waste" }],
   },
   {
     label: "Employees",
@@ -60,23 +67,46 @@ export function Sidebar() {
         </div>
 
         <nav className="flex-1 space-y-1 px-2 py-2">
-          {navItems.map(({ label, href, Icon }) => {
+          {navItems.map(({ label, href, Icon, children }) => {
             const isActive =
               pathname === href || pathname.startsWith(`${href}/`);
 
             return (
-              <Link
-                key={href}
-                href={href}
-                className={cn(
-                  "flex items-center gap-2 rounded-md border border-transparent px-2 py-2 text-sm text-zinc-700 transition-colors",
-                  "hover:bg-white hover:text-foreground",
-                  isActive && "border-border bg-white text-foreground"
-                )}
-              >
-                <Icon className="size-4" />
-                <span>{label}</span>
-              </Link>
+              <div key={href} className="space-y-1">
+                <Link
+                  href={href}
+                  className={cn(
+                    "flex items-center gap-2 rounded-md border border-transparent px-2 py-2 text-sm text-zinc-700 transition-colors",
+                    "hover:bg-white hover:text-foreground",
+                    isActive && "border-border bg-white text-foreground"
+                  )}
+                >
+                  <Icon className="size-4" />
+                  <span>{label}</span>
+                </Link>
+                {children?.length ? (
+                  <div className="ml-6 space-y-1">
+                    {children.map((child) => {
+                      const isChildActive =
+                        pathname === child.href ||
+                        pathname.startsWith(`${child.href}/`);
+                      return (
+                        <Link
+                          key={child.href}
+                          href={child.href}
+                          className={cn(
+                            "block rounded-md border border-transparent px-2 py-1.5 text-sm text-zinc-700 transition-colors",
+                            "hover:bg-white hover:text-foreground",
+                            isChildActive && "border-border bg-white text-foreground"
+                          )}
+                        >
+                          {child.label}
+                        </Link>
+                      );
+                    })}
+                  </div>
+                ) : null}
+              </div>
             );
           })}
         </nav>

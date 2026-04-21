@@ -16,7 +16,7 @@ export default async function ProductionEfficiencyReportPage() {
           Production Efficiency Report
         </h1>
         <p className="text-sm text-muted-foreground">
-          Compare finished goods output vs raw material allocations + waste.
+          Compare finished goods output with calculated raw material consumption.
         </p>
       </header>
 
@@ -36,49 +36,20 @@ export default async function ProductionEfficiencyReportPage() {
               <th
                 className="px-3 py-2 text-right font-medium text-foreground border-r"
               >
-                Total Waste (KG)
-              </th>
-              <th
-                className="px-3 py-2 text-right font-medium text-foreground border-r"
-              >
-                Total RM Required (KG)
+                Total RM Consumption (KG)
               </th>
 
               {rawMaterialColumns.map((m) => (
-                <th
-                  key={m.id}
-                  className="px-3 py-2 text-right font-medium text-foreground border-r"
-                >
-                  {m.name} (KG)
+                <th key={m.id} className="px-3 py-2 text-right font-medium text-foreground border-r">
+                  {m.name} Split (KG)
                 </th>
               ))}
-
-              <th
-                className="px-3 py-2 text-right font-medium text-foreground border-r"
-              >
-                Total RM Issued (KG)
-              </th>
-              <th
-                className="px-3 py-2 text-right font-medium text-foreground border-r"
-              >
-                Excess Issued (KG)
-              </th>
-              <th className="px-3 py-2 text-right font-medium text-foreground">
-                Excess %
-              </th>
             </tr>
           </thead>
 
           <tbody>
             {rows.map((r) => {
               const hasPieces = r.fgPieces > 0;
-              const excessColor =
-                r.excessKg > 0
-                  ? "text-amber-600"
-                  : r.excessKg < 0
-                    ? "text-red-600"
-                    : "text-green-600";
-
               return (
                 <tr key={r.monthIndex} className="border-b last:border-b-0">
                   <td className="px-3 py-2 tabular-nums border-r">
@@ -103,16 +74,12 @@ export default async function ProductionEfficiencyReportPage() {
                   </td>
 
                   <td className="px-3 py-2 text-right tabular-nums border-r">
-                    {r.totalWasteKg.toFixed(2)}
-                  </td>
-
-                  <td className="px-3 py-2 text-right tabular-nums border-r">
                     {r.totalRmRequiredKg.toFixed(2)}
                   </td>
 
                   {rawMaterialColumns.map((m) => {
                     const val =
-                      r.rmAllocatedByMaterialId?.[m.id] ?? 0;
+                      r.rmConsumptionByMaterialId?.[m.id] ?? 0;
                     return (
                       <td
                         key={`${r.monthIndex}-${m.id}`}
@@ -123,19 +90,6 @@ export default async function ProductionEfficiencyReportPage() {
                     );
                   })}
 
-                  <td className="px-3 py-2 text-right tabular-nums border-r">
-                    {r.totalRmIssuedKg.toFixed(2)}
-                  </td>
-                  <td
-                    className={`px-3 py-2 text-right tabular-nums border-r ${excessColor}`}
-                  >
-                    {r.excessKg.toFixed(2)}
-                  </td>
-                  <td
-                    className={`px-3 py-2 text-right tabular-nums ${excessColor}`}
-                  >
-                    {r.excessPct.toFixed(2)}%
-                  </td>
                 </tr>
               );
             })}

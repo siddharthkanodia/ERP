@@ -1,16 +1,20 @@
 "use client";
 
 import { useState } from "react";
+import * as Select from "@radix-ui/react-select";
+import { Check, ChevronDown, Plus, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 
 import { updateWorkOrder } from "@/actions/production";
 
 const primaryButtonClass =
   "h-8 inline-flex items-center justify-center rounded-md border border-black bg-black px-3 text-sm font-medium text-white transition-colors hover:bg-black/90";
+const outlinedButtonClass =
+  "h-8 inline-flex items-center justify-center rounded-md border border-black bg-white px-3 text-sm font-medium text-black transition-colors hover:bg-muted";
 
 export function EditWorkOrderForm({
   workOrder,
-  availableStocks,
+  rawMaterials,
 }: {
   workOrder: {
     id: string;
@@ -20,15 +24,14 @@ export function EditWorkOrderForm({
     finishedProductName: string;
     finishedProductVariantName: string | null;
     rawMaterials: Array<{
-      id: string;
       rawMaterialId: string;
       name: string;
-      quantityIssued: number;
     }>;
   };
-  availableStocks: Array<{
-    rawMaterialId: string;
-    quantityInStock: number;
+  rawMaterials: Array<{
+    id: string;
+    name: string;
+    floorStock: number;
   }>;
 }) {
   const router = useRouter();
@@ -37,8 +40,8 @@ export function EditWorkOrderForm({
   );
   const [rows, setRows] = useState(
     workOrder.rawMaterials.map((rm) => ({
-      ...rm,
-      quantityIssuedInput: rm.quantityIssued.toString(),
+      key: crypto.randomUUID(),
+      rawMaterialId: rm.rawMaterialId,
     }))
   );
   const [error, setError] = useState<string | null>(null);
@@ -53,50 +56,40 @@ export function EditWorkOrderForm({
       setError("Planned quantity must be greater than 0.");
       return;
     }
-    if (planned < workOrder.totalProduced) {
-      setError("Planned quantity cannot be less than total produced.");
-      return;
-    }
     if (workOrder.unit === "PIECE" && !Number.isInteger(planned)) {
       setError("Planned quantity must be a whole number for pcs.");
       return;
     }
 
-    const parsedRows = rows.map((r) => ({
-      id: r.id,
-      rawMaterialId: r.rawMaterialId,
-      oldQuantityIssued: r.quantityIssued,
-      quantityIssued: Number.parseFloat(r.quantityIssuedInput),
-    }));
+    if (rows.length === 0) {
+      setError("At least one raw material type is required.");
+      return;
+    }
 
-    for (const row of parsedRows) {
-      if (!Number.isFinite(row.quantityIssued) || row.quantityIssued <= 0) {
-        setError("Each issued quantity must be greater than 0.");
-        return;
-      }
-      const stock = availableStocks.find(
-        (s) => s.rawMaterialId === row.rawMaterialId
-      )?.quantityInStock;
-      if (typeof stock === "number" && row.quantityIssued > row.oldQuantityIssued) {
-        const extraNeeded = row.quantityIssued - row.oldQuantityIssued;
-        if (extraNeeded > stock) {
-          setError("Insufficient raw material stock for one or more rows.");
-          return;
-        }
-      }
+    const ids = rows.map((r) => r.rawMaterialId).filter(Boolean);
+    if (ids.length !== rows.length) {
+      setError("Please select raw material in all rows.");
+      return;
+    }
+    if (new Set(ids).size !== ids.length) {
+      setError("Same raw material cannot be selected twice.");
+      return;
+    }
+
+    let forceComplete = false;
+    if (workOrder.totalProduced < planned) {
+      forceComplete = window.confirm(
+        "Actual production is less than planned. Mark complete?"
+      );
     }
 
     const payload = new FormData();
     payload.set("plannedQuantity", planned.toString());
     payload.set(
       "rawMaterials",
-      JSON.stringify(
-        parsedRows.map((r) => ({
-          id: r.id,
-          quantityIssued: r.quantityIssued,
-        }))
-      )
+      JSON.stringify(ids.map((rawMaterialId) => ({ rawMaterialId })))
     );
+    payload.set("forceComplete", forceComplete ? "1" : "0");
 
     setIsPending(true);
     const result = await updateWorkOrder(workOrder.id, payload);
@@ -119,7 +112,7 @@ export function EditWorkOrderForm({
           value={workOrder.finishedProductName}
           disabled
           readOnly
-          className="h-9 w-full rounded-md border bg-gray-50 px-3 py-2 text-sm opacity-50 cursor-not-allowed"
+          className="h-9 w-full cursor-not-allowed rounded-md border bg-gray-50 px-3 py-2 text-sm opacity-50"
         />
       </div>
       <div className="space-y-1.5">
@@ -129,7 +122,7 @@ export function EditWorkOrderForm({
           value={workOrder.finishedProductVariantName || "-"}
           disabled
           readOnly
-          className="h-9 w-full rounded-md border bg-gray-50 px-3 py-2 text-sm opacity-50 cursor-not-allowed"
+          className="h-9 w-full cursor-not-allowed rounded-md border bg-gray-50 px-3 py-2 text-sm opacity-50"
         />
       </div>
 
@@ -147,47 +140,114 @@ export function EditWorkOrderForm({
         />
       </div>
 
-      <div className="overflow-x-auto rounded-md border">
-        <table className="min-w-full border-collapse text-sm">
-          <thead>
-            <tr className="border-b bg-muted/40 text-left">
-              <th className="px-3 py-2 font-medium">Raw Material Name</th>
-              <th className="px-3 py-2 text-right font-medium">Quantity Issued</th>
-              <th className="px-3 py-2 text-right font-medium">Available Stock</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row) => {
-              const available =
-                availableStocks.find((s) => s.rawMaterialId === row.rawMaterialId)
-                  ?.quantityInStock ?? 0;
-              return (
-                <tr key={row.id} className="border-b last:border-b-0">
-                  <td className="px-3 py-2">{row.name}</td>
-                  <td className="px-3 py-2 text-right">
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      value={row.quantityIssuedInput}
-                      onChange={(e) =>
-                        setRows((prev) =>
-                          prev.map((r) =>
-                            r.id === row.id
-                              ? { ...r, quantityIssuedInput: e.target.value }
-                              : r
-                          )
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <label className="text-sm font-medium">Raw Material Types</label>
+          <button
+            type="button"
+            className={outlinedButtonClass}
+            onClick={() =>
+              setRows((prev) => [
+                ...prev,
+                { key: crypto.randomUUID(), rawMaterialId: "" },
+              ])
+            }
+          >
+            <Plus className="mr-1 size-4" />
+            Add Raw Material
+          </button>
+        </div>
+
+        {rows.map((row, index) => {
+          const selectedIds = new Set(
+            rows.filter((r) => r.key !== row.key).map((r) => r.rawMaterialId)
+          );
+          const selectedMaterial = rawMaterials.find(
+            (m) => m.id === row.rawMaterialId
+          );
+
+          return (
+            <div key={row.key} className="rounded-md border bg-background p-3">
+              <div className="grid gap-3 md:grid-cols-[1fr_auto]">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-muted-foreground">
+                    Raw Material
+                  </label>
+                  <Select.Root
+                    value={row.rawMaterialId}
+                    onValueChange={(value) =>
+                      setRows((prev) =>
+                        prev.map((r) =>
+                          r.key === row.key ? { ...r, rawMaterialId: value } : r
                         )
-                      }
-                      className="h-8 w-28 rounded-md border bg-background px-2 py-1 text-right text-sm outline-none ring-ring/50 focus-visible:ring-2"
-                    />
-                  </td>
-                  <td className="px-3 py-2 text-right tabular-nums">{available} kg</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+                      )
+                    }
+                  >
+                    <Select.Trigger className="flex h-9 w-full items-center justify-between rounded-md border bg-background px-3 py-2 text-sm outline-none ring-ring/50 focus-visible:ring-2">
+                      <Select.Value placeholder="Select raw material" />
+                      <Select.Icon>
+                        <ChevronDown className="size-4 text-muted-foreground" />
+                      </Select.Icon>
+                    </Select.Trigger>
+                    <Select.Portal>
+                      <Select.Content
+                        position="popper"
+                        className="z-50 min-w-(--radix-select-trigger-width) overflow-hidden rounded-md border bg-popover shadow-md"
+                      >
+                        <Select.Viewport className="p-1">
+                          {rawMaterials.map((material) => (
+                            <Select.Item
+                              key={material.id}
+                              value={material.id}
+                              disabled={selectedIds.has(material.id)}
+                              className="relative flex cursor-default items-center rounded-sm py-2 pr-8 pl-2 text-sm outline-none select-none hover:bg-muted data-highlighted:bg-muted data-disabled:cursor-not-allowed data-disabled:opacity-50"
+                            >
+                              <Select.ItemText>
+                                {material.name} · Floor: {material.floorStock.toFixed(2)} kg
+                              </Select.ItemText>
+                              <Select.ItemIndicator className="absolute right-2 inline-flex items-center">
+                                <Check className="size-4" />
+                              </Select.ItemIndicator>
+                            </Select.Item>
+                          ))}
+                        </Select.Viewport>
+                      </Select.Content>
+                    </Select.Portal>
+                  </Select.Root>
+                  {selectedMaterial ? (
+                    selectedMaterial.floorStock <= 0 ? (
+                      <p className="text-xs font-medium text-amber-600">
+                        No floor stock for {selectedMaterial.name}. Issue to floor before producing.
+                      </p>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">
+                        Floor stock: {selectedMaterial.floorStock.toFixed(2)} kg
+                      </p>
+                    )
+                  ) : null}
+                </div>
+
+                <div className="flex items-end">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setRows((prev) =>
+                        prev.length === 1
+                          ? prev
+                          : prev.filter((r) => r.key !== row.key)
+                      )
+                    }
+                    disabled={rows.length === 1}
+                    className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-black bg-white text-black transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+                    aria-label={`Remove raw material row ${index + 1}`}
+                  >
+                    <Trash2 className="size-4" />
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+        })}
       </div>
 
       {error ? <p className="text-sm text-destructive">{error}</p> : null}
@@ -200,4 +260,3 @@ export function EditWorkOrderForm({
     </form>
   );
 }
-

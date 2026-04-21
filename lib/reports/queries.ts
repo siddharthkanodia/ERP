@@ -101,7 +101,7 @@ export async function getFinishedGoodsReportRange(
   if (dbEnd.getTime() < dbStart.getTime()) return [];
 
   const product = await prisma.finishedProduct.findFirst({
-    where: { id: productId, isDeleted: false },
+    where: { id: productId, isDeleted: false, isWaste: false },
     select: {
       id: true,
       quantityInStock: true,
@@ -332,12 +332,8 @@ export type ProductionEfficiencyRow = {
   monthLabel: string; // e.g. Jan
   fgPieces: number;
   fgWeightKg: number;
-  totalWasteKg: number;
   totalRmRequiredKg: number;
-  rmAllocatedByMaterialId: Record<string, number>;
-  totalRmIssuedKg: number;
-  excessKg: number;
-  excessPct: number;
+  rmConsumptionByMaterialId: Record<string, number>;
 };
 
 export type ProductionEfficiencyReport = {
@@ -368,17 +364,13 @@ export async function getProductionEfficiencyReport(
     monthLabel: format(new Date(year, i, 1), "MMM"),
     fgPieces: 0,
     fgWeightKg: 0,
-    totalWasteKg: 0,
     totalRmRequiredKg: 0,
-    rmAllocatedByMaterialId: {},
-    totalRmIssuedKg: 0,
-    excessKg: 0,
-    excessPct: 0,
+    rmConsumptionByMaterialId: {},
   }));
 
   for (const r of rows) {
     for (const m of rawMaterials) {
-      r.rmAllocatedByMaterialId[m.id] = 0;
+      r.rmConsumptionByMaterialId[m.id] = 0;
     }
   }
 
@@ -396,12 +388,11 @@ export async function getProductionEfficiencyReport(
         select: { weightInGrams: true },
       },
       productionEntries: {
-        select: { quantityProduced: true, wasteGenerated: true },
+        select: { quantityProduced: true },
       },
       rawMaterials: {
         select: {
           rawMaterialId: true,
-          quantityIssued: true,
         },
       },
     },
@@ -421,7 +412,6 @@ export async function getProductionEfficiencyReport(
 
     let piecesProduced = 0;
     let producedKg = 0;
-    let wasteKg = 0;
 
     for (const entry of wo.productionEntries) {
       const produced = Number(entry.quantityProduced);
@@ -431,10 +421,6 @@ export async function getProductionEfficiencyReport(
         producedKg = round2FromNumber(producedKg + produced);
       } else {
         piecesProduced += produced;
-      }
-      const wastePart = Number(entry.wasteGenerated);
-      if (Number.isFinite(wastePart)) {
-        wasteKg = round2FromNumber(wasteKg + wastePart);
       }
     }
 
@@ -451,32 +437,20 @@ export async function getProductionEfficiencyReport(
 
     row.fgPieces = round2FromNumber(row.fgPieces + piecesProduced);
     row.fgWeightKg = round2FromNumber(row.fgWeightKg + producedKg);
-    row.totalWasteKg = round2FromNumber(row.totalWasteKg + wasteKg);
+    const consumptionForWorkOrder = producedKg;
+    row.totalRmRequiredKg = round2FromNumber(row.totalRmRequiredKg + consumptionForWorkOrder);
 
-    for (const rm of wo.rawMaterials) {
-      if (!rm.rawMaterialId || !rawMaterialIdSet.has(rm.rawMaterialId)) continue;
-      const qty = Number(rm.quantityIssued);
-      if (!Number.isFinite(qty)) continue;
-      row.rmAllocatedByMaterialId[rm.rawMaterialId] = round2FromNumber(
-        row.rmAllocatedByMaterialId[rm.rawMaterialId] + qty
-      );
+    const rawMaterialTypeIds = wo.rawMaterials
+      .map((rm) => rm.rawMaterialId)
+      .filter((id): id is string => Boolean(id && rawMaterialIdSet.has(id)));
+    if (rawMaterialTypeIds.length > 0 && consumptionForWorkOrder > 0) {
+      const splitConsumption = consumptionForWorkOrder / rawMaterialTypeIds.length;
+      for (const rawMaterialId of rawMaterialTypeIds) {
+        row.rmConsumptionByMaterialId[rawMaterialId] = round2FromNumber(
+          row.rmConsumptionByMaterialId[rawMaterialId] + splitConsumption
+        );
+      }
     }
-  }
-
-  for (const row of rows) {
-    row.totalRmRequiredKg = round2FromNumber(
-      row.fgWeightKg + row.totalWasteKg
-    );
-    const totalIssued = Object.values(row.rmAllocatedByMaterialId).reduce(
-      (sum, v) => sum + (Number.isFinite(v) ? v : 0),
-      0
-    );
-    row.totalRmIssuedKg = round2FromNumber(totalIssued);
-    row.excessKg = round2FromNumber(row.totalRmIssuedKg - row.totalRmRequiredKg);
-    row.excessPct =
-      row.totalRmRequiredKg > 0
-        ? round2FromNumber((row.excessKg / row.totalRmRequiredKg) * 100)
-        : 0;
   }
 
   return { rawMaterials, rows };

@@ -16,7 +16,7 @@ export default async function FinishedProductsPage() {
       <header className="mb-5 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold tracking-tight">
-            Finished Products
+            Finished Goods
           </h1>
           <p className="text-sm text-muted-foreground">
             Track stock levels and latest dispatch activity.

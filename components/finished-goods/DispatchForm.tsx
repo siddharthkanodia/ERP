@@ -7,8 +7,10 @@ import * as Popover from "@radix-ui/react-popover";
 import { format } from "date-fns";
 import { CalendarIcon, Check, ChevronDown, Trash2 } from "lucide-react";
 
-import { dispatchFinishedGoodsBatch } from "@/actions/finished-goods";
-import { getAllFinishedProducts } from "@/actions/finished-products";
+import {
+  dispatchFinishedGoodsBatch,
+  getAllFinishedProducts,
+} from "@/actions/finished-products";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import { cn } from "@/lib/utils";
@@ -253,11 +255,8 @@ export function DispatchForm() {
           const unitLabel = opt?.unit === "PIECE" ? "pcs" : "kg";
           const step = opt?.unit === "PIECE" ? "1" : "0.01";
           return (
-            <div
-              key={line.id}
-              className="flex flex-col gap-2 sm:flex-row sm:items-end"
-            >
-              <div className="min-w-0 flex-1 space-y-1.5">
+            <div key={line.id} className="flex w-full items-center gap-3">
+              <div className="min-w-0 flex-1">
                 <label className="text-xs text-muted-foreground sm:sr-only">
                   Finished good {index + 1}
                 </label>
@@ -279,7 +278,9 @@ export function DispatchForm() {
                   <Select.Portal>
                     <Select.Content
                       position="popper"
-                      className="z-50 min-w-(--radix-select-trigger-width) overflow-hidden rounded-md border bg-popover shadow-md"
+                      side="bottom"
+                      sideOffset={4}
+                      className="z-50 max-h-60 min-w-(--radix-select-trigger-width) overflow-y-auto rounded-md border bg-popover shadow-md"
                     >
                       <Select.Viewport className="p-1">
                         {options.map((o) => (
@@ -301,7 +302,7 @@ export function DispatchForm() {
                   </Select.Portal>
                 </Select.Root>
               </div>
-              <div className="w-full space-y-1.5 sm:w-32">
+              <div className="w-32 shrink-0">
                 <label className="text-xs text-muted-foreground sm:sr-only">
                   Qty ({unitLabel})
                 </label>
@@ -315,17 +316,19 @@ export function DispatchForm() {
                   placeholder={opt?.unit === "PIECE" ? "e.g. 10" : "e.g. 10.55"}
                 />
               </div>
-              <Button
-                type="button"
-                variant="outline"
-                size="icon"
-                className="h-9 shrink-0"
-                disabled={lines.length === 1}
-                onClick={() => removeLine(line.id)}
-                aria-label="Remove row"
-              >
-                <Trash2 className="size-4" />
-              </Button>
+              <div className="shrink-0">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  className="h-9 shrink-0"
+                  disabled={lines.length === 1}
+                  onClick={() => removeLine(line.id)}
+                  aria-label="Remove row"
+                >
+                  <Trash2 className="size-4" />
+                </Button>
+              </div>
             </div>
           );
         })}

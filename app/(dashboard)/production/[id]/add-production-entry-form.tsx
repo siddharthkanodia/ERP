@@ -8,6 +8,14 @@ import { addProductionEntry } from "@/actions/production";
 const primaryButtonClass =
   "h-8 inline-flex items-center justify-center rounded-md border border-black bg-black px-3 text-sm font-medium text-white transition-colors hover:bg-black/90";
 
+function todayLocalISODate() {
+  const d = new Date();
+  const yyyy = d.getFullYear();
+  const mm = `${d.getMonth() + 1}`.padStart(2, "0");
+  const dd = `${d.getDate()}`.padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+
 export function AddProductionEntryForm({
   workOrderId,
   unit,
@@ -17,7 +25,7 @@ export function AddProductionEntryForm({
 }) {
   const router = useRouter();
   const [quantityProduced, setQuantityProduced] = useState("");
-  const [wasteGenerated, setWasteGenerated] = useState("0");
+  const [entryDate, setEntryDate] = useState(todayLocalISODate());
   const [error, setError] = useState<string | null>(null);
   const [isPending, setIsPending] = useState(false);
 
@@ -26,23 +34,22 @@ export function AddProductionEntryForm({
     setError(null);
 
     const produced = Number.parseFloat(quantityProduced);
-    const waste = Number.parseFloat(wasteGenerated || "0");
     if (!Number.isFinite(produced) || produced <= 0) {
-      setError("Quantity produced must be greater than 0.");
-      return;
-    }
-    if (!Number.isFinite(waste) || waste < 0) {
-      setError("Waste generated cannot be negative.");
+      setError("Production quantity must be greater than 0.");
       return;
     }
     if (unit === "PIECE" && !Number.isInteger(produced)) {
-      setError("Quantity produced must be a whole number for pcs.");
+      setError("Production quantity must be a whole number for pcs.");
+      return;
+    }
+    if (!entryDate) {
+      setError("Entry date is required.");
       return;
     }
 
     const payload = new FormData();
     payload.set("quantityProduced", produced.toString());
-    payload.set("wasteGenerated", waste.toString());
+    payload.set("entryDate", entryDate);
 
     setIsPending(true);
     const result = await addProductionEntry(workOrderId, payload);
@@ -53,7 +60,7 @@ export function AddProductionEntryForm({
     }
 
     setQuantityProduced("");
-    setWasteGenerated("0");
+    setEntryDate(todayLocalISODate());
     router.refresh();
   }
 
@@ -77,16 +84,14 @@ export function AddProductionEntryForm({
           />
         </div>
         <div className="space-y-1.5">
-          <label className="text-sm font-medium">
-            Waste Generated (kg)
-          </label>
+          <label className="text-sm font-medium">Date</label>
           <input
-            type="number"
-            min="0"
-            step="0.01"
-            value={wasteGenerated}
-            onChange={(e) => setWasteGenerated(e.target.value)}
+            type="date"
+            value={entryDate}
+            onChange={(e) => setEntryDate(e.target.value)}
+            max={todayLocalISODate()}
             className="h-9 w-full rounded-md border bg-background px-3 py-2 text-sm outline-none ring-ring/50 focus-visible:ring-2"
+            required
           />
         </div>
       </div>
@@ -101,4 +106,3 @@ export function AddProductionEntryForm({
     </form>
   );
 }
-

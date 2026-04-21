@@ -22,13 +22,12 @@ type FinishedProduct = {
 type RawMaterial = {
   id: string;
   name: string;
-  quantityInStock: number;
+  floorStock: number;
 };
 
 type RawMaterialRow = {
   key: string;
   rawMaterialId: string;
-  quantityIssued: string;
 };
 
 type FormState = { error?: string };
@@ -53,7 +52,7 @@ export function CreateWorkOrderForm({
   const [finishedProductVariantId, setFinishedProductVariantId] = useState("");
   const [plannedQuantity, setPlannedQuantity] = useState("");
   const [rows, setRows] = useState<RawMaterialRow[]>([
-    { key: crypto.randomUUID(), rawMaterialId: "", quantityIssued: "" },
+    { key: crypto.randomUUID(), rawMaterialId: "" },
   ]);
 
   const selectedFinishedProduct = useMemo(
@@ -89,11 +88,11 @@ export function CreateWorkOrderForm({
       }
 
       if (rows.length === 0) {
-        return { error: "At least one raw material is required." };
+        return { error: "At least one raw material type is required." };
       }
 
       const selectedSet = new Set<string>();
-      let serializedRows: { rawMaterialId: string; quantityIssued: number }[] = [];
+      let serializedRows: { rawMaterialId: string }[] = [];
       try {
         serializedRows = rows.map((row) => {
           if (!row.rawMaterialId) {
@@ -104,14 +103,8 @@ export function CreateWorkOrderForm({
           }
           selectedSet.add(row.rawMaterialId);
 
-          const qty = Number.parseFloat(row.quantityIssued);
-          if (!Number.isFinite(qty) || qty <= 0) {
-            throw new Error("Quantity issued must be greater than 0 in all rows.");
-          }
-
           return {
             rawMaterialId: row.rawMaterialId,
-            quantityIssued: qty,
           };
         });
       } catch (error) {
@@ -203,12 +196,6 @@ export function CreateWorkOrderForm({
             </Select.Content>
           </Select.Portal>
         </Select.Root>
-        {selectedFinishedProduct ? (
-          <p className="text-xs text-muted-foreground">
-            Current Stock: {selectedFinishedProduct.quantityInStock}{" "}
-            {selectedFinishedProduct.unit === "PIECE" ? "pcs" : "kg"}
-          </p>
-        ) : null}
       </div>
 
       {selectedFinishedProduct && hasVariants ? (
@@ -270,14 +257,14 @@ export function CreateWorkOrderForm({
 
       <div className="space-y-2">
         <div className="flex items-center justify-between">
-          <label className="text-sm font-medium">Raw Materials Issued</label>
+          <label className="text-sm font-medium">Raw Material Types</label>
           <button
             type="button"
             className={outlinedButtonClass}
             onClick={() =>
               setRows((prev) => [
                 ...prev,
-                { key: crypto.randomUUID(), rawMaterialId: "", quantityIssued: "" },
+                { key: crypto.randomUUID(), rawMaterialId: "" },
               ])
             }
           >
@@ -296,7 +283,7 @@ export function CreateWorkOrderForm({
 
           return (
             <div key={row.key} className="rounded-md border bg-background p-3">
-              <div className="grid gap-3 md:grid-cols-[1fr_1fr_auto]">
+              <div className="grid gap-3 md:grid-cols-[1fr_auto]">
                 <div className="space-y-1.5">
                   <label className="text-xs font-medium text-muted-foreground">
                     Raw Material
@@ -330,7 +317,9 @@ export function CreateWorkOrderForm({
                               disabled={selectedIds.has(material.id)}
                               className="relative flex cursor-default items-center rounded-sm py-2 pr-8 pl-2 text-sm outline-none select-none hover:bg-muted data-highlighted:bg-muted data-disabled:cursor-not-allowed data-disabled:opacity-50"
                             >
-                              <Select.ItemText>{material.name}</Select.ItemText>
+                              <Select.ItemText>
+                                {material.name} · Floor: {material.floorStock.toFixed(2)} kg
+                              </Select.ItemText>
                               <Select.ItemIndicator className="absolute right-2 inline-flex items-center">
                                 <Check className="size-4" />
                               </Select.ItemIndicator>
@@ -340,33 +329,16 @@ export function CreateWorkOrderForm({
                       </Select.Content>
                     </Select.Portal>
                   </Select.Root>
-                </div>
-
-                <div className="space-y-1.5">
-                  <label className="text-xs font-medium text-muted-foreground">
-                    Quantity Issued (kg)
-                  </label>
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={row.quantityIssued}
-                    onChange={(e) =>
-                      setRows((prev) =>
-                        prev.map((r) =>
-                          r.key === row.key
-                            ? { ...r, quantityIssued: e.target.value }
-                            : r
-                        )
-                      )
-                    }
-                    className="h-9 w-full rounded-md border bg-background px-3 py-2 text-sm outline-none ring-ring/50 focus-visible:ring-2"
-                    required
-                  />
                   {selectedMaterial ? (
-                    <p className="text-xs text-muted-foreground">
-                      Available Stock: {selectedMaterial.quantityInStock} kg
-                    </p>
+                    selectedMaterial.floorStock <= 0 ? (
+                      <p className="text-xs font-medium text-amber-600">
+                        No floor stock for {selectedMaterial.name}. Issue to floor before production.
+                      </p>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">
+                        Floor stock: {selectedMaterial.floorStock.toFixed(2)} kg
+                      </p>
+                    )
                   ) : null}
                 </div>
 
@@ -399,7 +371,6 @@ export function CreateWorkOrderForm({
         value={JSON.stringify(
           rows.map((r) => ({
             rawMaterialId: r.rawMaterialId,
-            quantityIssued: Number.parseFloat(r.quantityIssued || "0"),
           }))
         )}
       />
@@ -430,4 +401,3 @@ export function CreateWorkOrderForm({
     </form>
   );
 }
-
