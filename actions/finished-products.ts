@@ -1,6 +1,7 @@
 "use server";
 
 import type { Prisma } from "@prisma/client";
+import { getAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
@@ -91,13 +92,14 @@ function toTwoDecimals(value: number) {
 
 async function rebuildFinishedProductLedgerBalances(
   finishedProductId: string,
+  companyId: string,
   tx: Prisma.TransactionClient,
   finishedProductVariantId?: string | null
 ) {
-  // ISOLATION: always scoped by finishedProductId (ID, not name)
-  // Soft-deleted products with same name are separate records
+  // ISOLATION: always scoped by finishedProductId (ID, not name) and companyId
   const entries = await tx.finishedProductLedger.findMany({
     where: {
+      companyId,
       finishedProductId,
       finishedProductVariantId: finishedProductVariantId ?? null,
     },
@@ -118,8 +120,6 @@ async function rebuildFinishedProductLedgerBalances(
       Number(entry.quantityDispatched);
     runningBalance = closingBalance;
 
-    // ISOLATION: always scoped by finishedProductId (ID, not name)
-    // Soft-deleted products with same name are separate records
     return tx.finishedProductLedger.update({
       where: { id: entry.id },
       data: { openingBalance, closingBalance },
@@ -130,6 +130,10 @@ async function rebuildFinishedProductLedgerBalances(
 }
 
 export async function createFinishedProduct(formData: FormData) {
+  const session = await getAuthSession();
+  if (!session?.companyId) throw new Error("Unauthorized");
+  const companyId = session.companyId;
+
   const name = formData.get("name") as string;
   const unit = formData.get("unit") as "KG" | "PIECE";
   const initialQuantityRaw = formData.get("initialQuantity") as string | null;
@@ -146,6 +150,7 @@ export async function createFinishedProduct(formData: FormData) {
 
   const existingActiveProduct = await prisma.finishedProduct.findFirst({
     where: {
+      companyId,
       name: { equals: name.trim(), mode: "insensitive" },
       isDeleted: false,
     },
@@ -210,6 +215,7 @@ export async function createFinishedProduct(formData: FormData) {
     await prisma.$transaction(async (tx) => {
       const product = await tx.finishedProduct.create({
         data: {
+          companyId,
           name: name.trim(),
           unit,
           quantityInStock: variants.length > 0 ? 0 : parsedInitialQuantity,
@@ -224,6 +230,7 @@ export async function createFinishedProduct(formData: FormData) {
           const initialQuantity = variant.initialQuantity ?? 0;
           const createdVariant = await tx.finishedProductVariant.create({
             data: {
+              companyId,
               finishedProductId: product.id,
               name: variant.name,
               weightInGrams: variant.weightInGrams,
@@ -232,10 +239,9 @@ export async function createFinishedProduct(formData: FormData) {
           });
 
           if (initialQuantity > 0) {
-            // ISOLATION: always scoped by finishedProductId (ID, not name)
-            // Soft-deleted products with same name are separate records
             await tx.finishedProductLedger.create({
               data: {
+                companyId,
                 finishedProductId: product.id,
                 finishedProductVariantId: createdVariant.id,
                 eventType: "OPENING_STOCK",
@@ -249,10 +255,9 @@ export async function createFinishedProduct(formData: FormData) {
           }
         }
       } else if (parsedInitialQuantity > 0) {
-        // ISOLATION: always scoped by finishedProductId (ID, not name)
-        // Soft-deleted products with same name are separate records
         await tx.finishedProductLedger.create({
           data: {
+            companyId,
             finishedProductId: product.id,
             eventType: "OPENING_STOCK",
             openingBalance: 0,
@@ -284,6 +289,10 @@ export async function createFinishedProduct(formData: FormData) {
 }
 
 export async function dispatchFinishedProduct(formData: FormData) {
+  const session = await getAuthSession();
+  if (!session?.companyId) throw new Error("Unauthorized");
+  const companyId = session.companyId;
+
   const productId =
     ((formData.get("productId") as string | null) ??
       (formData.get("id") as string | null) ??
@@ -311,7 +320,7 @@ export async function dispatchFinishedProduct(formData: FormData) {
   }
 
   const product = await prisma.finishedProduct.findFirst({
-    where: { id: productId, isDeleted: false },
+    where: { id: productId, companyId, isDeleted: false },
     include: {
       variants: {
         where: { isDeleted: false },
@@ -359,6 +368,7 @@ export async function dispatchFinishedProduct(formData: FormData) {
         const updated = await tx.finishedProductVariant.updateMany({
           where: {
             id: selectedVariant.id,
+            companyId,
             finishedProductId: productId,
             quantityInStock: { gte: quantity },
           },
@@ -371,7 +381,7 @@ export async function dispatchFinishedProduct(formData: FormData) {
         }
       } else {
         const updated = await tx.finishedProduct.updateMany({
-          where: { id: productId, quantityInStock: { gte: quantity } },
+          where: { id: productId, companyId, quantityInStock: { gte: quantity } },
           data: { quantityInStock: { decrement: quantity } },
         });
         if (updated.count !== 1) {
@@ -382,7 +392,7 @@ export async function dispatchFinishedProduct(formData: FormData) {
       }
 
       await tx.finishedProduct.update({
-        where: { id: productId },
+        where: { id: productId, companyId },
         data: {
           lastDispatchedAt: dispatchDate,
           lastDispatchedQuantity: quantity,
@@ -391,6 +401,7 @@ export async function dispatchFinishedProduct(formData: FormData) {
 
       await tx.finishedProductLedger.create({
         data: {
+          companyId,
           finishedProductId: productId,
           finishedProductVariantId: selectedVariant?.id ?? null,
           date: dispatchDate,
@@ -405,6 +416,7 @@ export async function dispatchFinishedProduct(formData: FormData) {
 
       await rebuildFinishedProductLedgerBalances(
         productId,
+        companyId,
         tx,
         selectedVariant?.id ?? null
       );
@@ -445,6 +457,10 @@ export type DispatchFinishedGoodsBatchInput = {
 export async function dispatchFinishedGoodsBatch(
   input: DispatchFinishedGoodsBatchInput
 ): Promise<{ error: string } | void> {
+  const session = await getAuthSession();
+  if (!session?.companyId) throw new Error("Unauthorized");
+  const companyId = session.companyId;
+
   const dispatchDate = new Date(input.dispatchDate);
   const ledgerNotes = input.notes?.trim() ? input.notes.trim() : "Goods dispatched";
 
@@ -494,6 +510,7 @@ export async function dispatchFinishedGoodsBatch(
       const v = await prisma.finishedProductVariant.findFirst({
         where: {
           id: variantId,
+          companyId,
           isDeleted: false,
           finishedProduct: { isDeleted: false },
         },
@@ -514,7 +531,7 @@ export async function dispatchFinishedGoodsBatch(
 
   for (const row of parsed) {
     const product = await prisma.finishedProduct.findFirst({
-      where: { id: row.productId, isDeleted: false },
+      where: { id: row.productId, companyId, isDeleted: false },
       include: {
         variants: { where: { isDeleted: false }, select: { id: true, quantityInStock: true } },
       },
@@ -557,12 +574,16 @@ export async function dispatchFinishedGoodsBatch(
   try {
     await prisma.$transaction(async (tx) => {
       for (const row of parsed) {
-        const product = await tx.finishedProduct.findFirstOrThrow({
-          where: { id: row.productId, isDeleted: false },
+        const product = await tx.finishedProduct.findFirst({
+          where: { id: row.productId, companyId, isDeleted: false },
           include: {
             variants: { where: { isDeleted: false }, select: { id: true, quantityInStock: true } },
           },
         });
+
+        if (!product) {
+          throw Object.assign(new Error("Not found"), { code: "P2025" });
+        }
 
         const selectedVariant = row.variantId
           ? product.variants.find((v) => v.id === row.variantId) ?? null
@@ -580,6 +601,7 @@ export async function dispatchFinishedGoodsBatch(
           const updated = await tx.finishedProductVariant.updateMany({
             where: {
               id: selectedVariant.id,
+              companyId,
               finishedProductId: row.productId,
               quantityInStock: { gte: row.quantity },
             },
@@ -592,7 +614,7 @@ export async function dispatchFinishedGoodsBatch(
           }
         } else {
           const updated = await tx.finishedProduct.updateMany({
-            where: { id: row.productId, quantityInStock: { gte: row.quantity } },
+            where: { id: row.productId, companyId, quantityInStock: { gte: row.quantity } },
             data: { quantityInStock: { decrement: row.quantity } },
           });
           if (updated.count !== 1) {
@@ -603,7 +625,7 @@ export async function dispatchFinishedGoodsBatch(
         }
 
         await tx.finishedProduct.update({
-          where: { id: row.productId },
+          where: { id: row.productId, companyId },
           data: {
             lastDispatchedAt: dispatchDate,
             lastDispatchedQuantity: row.quantity,
@@ -612,6 +634,7 @@ export async function dispatchFinishedGoodsBatch(
 
         await tx.finishedProductLedger.create({
           data: {
+            companyId,
             finishedProductId: row.productId,
             finishedProductVariantId: selectedVariant?.id ?? null,
             date: dispatchDate,
@@ -626,6 +649,7 @@ export async function dispatchFinishedGoodsBatch(
 
         await rebuildFinishedProductLedgerBalances(
           row.productId,
+          companyId,
           tx,
           selectedVariant?.id ?? null
         );
@@ -657,8 +681,12 @@ export async function dispatchFinishedGoodsBatch(
 }
 
 export async function getAllFinishedProducts() {
+  const session = await getAuthSession();
+  if (!session?.companyId) throw new Error("Unauthorized");
+  const companyId = session.companyId;
+
   const products = await prisma.finishedProduct.findMany({
-    where: { isDeleted: false },
+    where: { companyId, isDeleted: false },
     include: {
       variants: {
         where: { isDeleted: false },
@@ -715,8 +743,12 @@ export async function getAllFinishedProducts() {
 }
 
 export async function getFinishedProductById(id: string) {
+  const session = await getAuthSession();
+  if (!session?.companyId) throw new Error("Unauthorized");
+  const companyId = session.companyId;
+
   const product = await prisma.finishedProduct.findFirst({
-    where: { id, isDeleted: false },
+    where: { id, companyId, isDeleted: false },
     include: {
       variants: {
         where: { isDeleted: false },
@@ -745,6 +777,10 @@ export async function getFinishedProductById(id: string) {
 }
 
 export async function updateFinishedProduct(id: string, formData: FormData) {
+  const session = await getAuthSession();
+  if (!session?.companyId) throw new Error("Unauthorized");
+  const companyId = session.companyId;
+
   const name = (formData.get("name") as string | null)?.trim() ?? "";
   const variants = parseVariantsInput(formData.get("variants"));
   const stockDistribution = parseStockDistributionInput(
@@ -757,6 +793,7 @@ export async function updateFinishedProduct(id: string, formData: FormData) {
 
   const existingActiveProduct = await prisma.finishedProduct.findFirst({
     where: {
+      companyId,
       id: { not: id },
       name: { equals: name, mode: "insensitive" },
       isDeleted: false,
@@ -768,7 +805,7 @@ export async function updateFinishedProduct(id: string, formData: FormData) {
   }
 
   const productMeta = await prisma.finishedProduct.findFirst({
-    where: { id, isDeleted: false },
+    where: { id, companyId, isDeleted: false },
     select: { unit: true },
   });
   if (!productMeta) {
@@ -777,7 +814,7 @@ export async function updateFinishedProduct(id: string, formData: FormData) {
 
   const keptOrCreated = variants.filter((v) => !v._delete);
   const existingVariantRowCount = await prisma.finishedProductVariant.count({
-    where: { finishedProductId: id, isDeleted: false },
+    where: { companyId, finishedProductId: id, isDeleted: false },
   });
   const isMigrationScenarioPreview =
     existingVariantRowCount === 0 && keptOrCreated.length > 0;
@@ -810,21 +847,21 @@ export async function updateFinishedProduct(id: string, formData: FormData) {
 
   try {
     await prisma.$transaction(async (tx) => {
-      const existingProduct = await tx.finishedProduct.findUnique({
-        where: { id },
+      const existingProduct = await tx.finishedProduct.findFirst({
+        where: { id, companyId },
         select: { id: true, unit: true, quantityInStock: true },
       });
       if (!existingProduct) {
         throw Object.assign(new Error("Not found"), { code: "P2025" });
       }
       const existingVariants = await tx.finishedProductVariant.findMany({
-        where: { finishedProductId: id },
+        where: { companyId, finishedProductId: id },
         select: { id: true },
       });
       const isMigrationScenario =
         existingVariants.length === 0 && keptOrCreated.length > 0;
 
-      await tx.finishedProduct.update({ where: { id }, data: { name } });
+      await tx.finishedProduct.update({ where: { id, companyId }, data: { name } });
 
       if (isMigrationScenario) {
         const parentStock = Number(existingProduct.quantityInStock);
@@ -879,7 +916,7 @@ export async function updateFinishedProduct(id: string, formData: FormData) {
           let variantId = target.id;
           if (variantId) {
             await tx.finishedProductVariant.update({
-              where: { id: variantId },
+              where: { id: variantId, companyId },
               data: {
                 name: target.name,
                 weightInGrams: target.weightInGrams,
@@ -889,6 +926,7 @@ export async function updateFinishedProduct(id: string, formData: FormData) {
           } else {
             const created = await tx.finishedProductVariant.create({
               data: {
+                companyId,
                 finishedProductId: id,
                 name: target.name,
                 weightInGrams: target.weightInGrams,
@@ -899,10 +937,9 @@ export async function updateFinishedProduct(id: string, formData: FormData) {
           }
 
           if (target.allocatedQuantity > 0) {
-            // ISOLATION: always scoped by finishedProductId (ID, not name)
-            // Soft-deleted products with same name are separate records
             await tx.finishedProductLedger.create({
               data: {
+                companyId,
                 finishedProductId: id,
                 finishedProductVariantId: variantId,
                 openingBalance: 0,
@@ -916,7 +953,7 @@ export async function updateFinishedProduct(id: string, formData: FormData) {
         }
 
         await tx.finishedProduct.update({
-          where: { id },
+          where: { id, companyId },
           data: { quantityInStock: 0 },
         });
         return;
@@ -925,8 +962,8 @@ export async function updateFinishedProduct(id: string, formData: FormData) {
       for (const variant of variants) {
         if (variant._delete === true) {
           if (!variant.id) continue;
-          const existing = await tx.finishedProductVariant.findUnique({
-            where: { id: variant.id },
+          const existing = await tx.finishedProductVariant.findFirst({
+            where: { id: variant.id, companyId },
             select: { id: true, finishedProductId: true, quantityInStock: true },
           });
           if (!existing || existing.finishedProductId !== id) continue;
@@ -942,7 +979,7 @@ export async function updateFinishedProduct(id: string, formData: FormData) {
 
         if (variant.id) {
           await tx.finishedProductVariant.update({
-            where: { id: variant.id },
+            where: { id: variant.id, companyId },
             data: {
               name: variant.name,
               weightInGrams: variant.weightInGrams,
@@ -958,6 +995,7 @@ export async function updateFinishedProduct(id: string, formData: FormData) {
         );
         const createdVariant = await tx.finishedProductVariant.create({
           data: {
+            companyId,
             finishedProductId: id,
             name: variant.name,
             weightInGrams: variant.weightInGrams,
@@ -966,10 +1004,9 @@ export async function updateFinishedProduct(id: string, formData: FormData) {
         });
 
         if (initialQty > 0) {
-          // ISOLATION: always scoped by finishedProductId (ID, not name)
-          // Soft-deleted products with same name are separate records
           await tx.finishedProductLedger.create({
             data: {
+              companyId,
               finishedProductId: id,
               finishedProductVariantId: createdVariant.id,
               eventType: "OPENING_STOCK",
@@ -1026,10 +1063,13 @@ export async function updateFinishedProduct(id: string, formData: FormData) {
 }
 
 export async function getFinishedProductLedger(id: string, variantId?: string) {
-  // ISOLATION: always scoped by finishedProductId (ID, not name)
-  // Soft-deleted products with same name are separate records
+  const session = await getAuthSession();
+  if (!session?.companyId) throw new Error("Unauthorized");
+  const companyId = session.companyId;
+
   const entries = await prisma.finishedProductLedger.findMany({
     where: {
+      companyId,
       finishedProductId: id,
       ...(variantId ? { finishedProductVariantId: variantId } : {}),
     },
@@ -1055,8 +1095,12 @@ export async function getFinishedProductLedger(id: string, variantId?: string) {
 }
 
 export async function getFinishedProductVariants(productId: string) {
+  const session = await getAuthSession();
+  if (!session?.companyId) throw new Error("Unauthorized");
+  const companyId = session.companyId;
+
   const variants = await prisma.finishedProductVariant.findMany({
-    where: { finishedProductId: productId, isDeleted: false },
+    where: { companyId, finishedProductId: productId, isDeleted: false },
     orderBy: { createdAt: "asc" },
     select: {
       id: true,
@@ -1075,6 +1119,10 @@ export async function getFinishedProductVariants(productId: string) {
 }
 
 export async function deleteFinishedProduct(productId: string) {
+  const session = await getAuthSession();
+  if (!session?.companyId) throw new Error("Unauthorized");
+  const companyId = session.companyId;
+
   if (!productId || productId.trim() === "") {
     return {
       error: "INVALID_PRODUCT_ID",
@@ -1085,6 +1133,7 @@ export async function deleteFinishedProduct(productId: string) {
   try {
     const activeWorkOrders = await prisma.workOrder.findMany({
       where: {
+        companyId,
         finishedProductId: productId,
         status: "OPEN",
       },
@@ -1113,21 +1162,19 @@ export async function deleteFinishedProduct(productId: string) {
       const deletedAt = new Date();
 
       await tx.finishedProductVariant.updateMany({
-        where: { finishedProductId: productId },
+        where: { companyId, finishedProductId: productId },
         data: {
           isDeleted: true,
           deletedAt,
         },
       });
 
-      // ISOLATION: always scoped by finishedProductId (ID, not name)
-      // Soft-deleted products with same name are separate records
       await tx.finishedProductLedger.deleteMany({
-        where: { finishedProductId: productId },
+        where: { companyId, finishedProductId: productId },
       });
 
       const updatedProduct = await tx.finishedProduct.updateMany({
-        where: { id: productId },
+        where: { id: productId, companyId },
         data: {
           isDeleted: true,
           deletedAt,
@@ -1142,6 +1189,7 @@ export async function deleteFinishedProduct(productId: string) {
 
       await tx.workOrder.updateMany({
         where: {
+          companyId,
           finishedProductId: productId,
           status: { in: ["COMPLETED", "CANCELLED"] },
         },
@@ -1176,10 +1224,15 @@ export async function deleteFinishedProduct(productId: string) {
 }
 
 export async function checkActiveWorkOrders(productId: string) {
+  const session = await getAuthSession();
+  if (!session?.companyId) throw new Error("Unauthorized");
+  const companyId = session.companyId;
+
   if (!productId || productId.trim() === "") return [];
 
   const workOrders = await prisma.workOrder.findMany({
     where: {
+      companyId,
       finishedProductId: productId,
       status: "OPEN",
     },
@@ -1197,6 +1250,10 @@ export async function checkActiveWorkOrders(productId: string) {
 }
 
 export async function debugFinishedProductVisibility(productId: string) {
+  const session = await getAuthSession();
+  if (!session?.companyId) throw new Error("Unauthorized");
+  const companyId = session.companyId;
+
   if (!productId || productId.trim() === "") {
     return {
       productExists: false,
@@ -1206,14 +1263,16 @@ export async function debugFinishedProductVisibility(productId: string) {
     };
   }
 
-  const product = await prisma.finishedProduct.findUnique({
-    where: { id: productId },
+  const product = await prisma.finishedProduct.findFirst({
+    where: { id: productId, companyId },
     select: { id: true, isDeleted: true },
   });
   const [variantsTotal, variantsNotDeleted] = await Promise.all([
-    prisma.finishedProductVariant.count({ where: { finishedProductId: productId } }),
     prisma.finishedProductVariant.count({
-      where: { finishedProductId: productId, isDeleted: false },
+      where: { companyId, finishedProductId: productId },
+    }),
+    prisma.finishedProductVariant.count({
+      where: { companyId, finishedProductId: productId, isDeleted: false },
     }),
   ]);
 

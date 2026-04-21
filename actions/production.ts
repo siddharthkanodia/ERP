@@ -2,6 +2,7 @@
 
 import type { Prisma, PrismaClient } from "@prisma/client";
 import type { ITXClientDenyList } from "@prisma/client/runtime/library";
+import { getAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
@@ -33,10 +34,11 @@ function parseJsonArray<T>(value: FormDataEntryValue | null): T[] | null {
 
 async function refreshWorkOrderStatus(
   workOrderId: string,
+  companyId: string,
   tx: Prisma.TransactionClient
 ) {
-  const workOrder = await tx.workOrder.findUnique({
-    where: { id: workOrderId },
+  const workOrder = await tx.workOrder.findFirst({
+    where: { id: workOrderId, companyId },
     select: {
       plannedQuantity: true,
       completedAt: true,
@@ -54,7 +56,7 @@ async function refreshWorkOrderStatus(
 
   if (totalProduced >= plannedQuantity) {
     await tx.workOrder.update({
-      where: { id: workOrderId },
+      where: { id: workOrderId, companyId },
       data: {
         status: "COMPLETED",
         completedAt: workOrder.completedAt ?? new Date(),
@@ -62,7 +64,7 @@ async function refreshWorkOrderStatus(
     });
   } else {
     await tx.workOrder.update({
-      where: { id: workOrderId },
+      where: { id: workOrderId, companyId },
       data: {
         status: "OPEN",
         completedAt: null,
@@ -73,10 +75,11 @@ async function refreshWorkOrderStatus(
 
 async function rebuildRawMaterialLedgerBalances(
   rawMaterialId: string,
+  companyId: string,
   tx: Omit<PrismaClient, ITXClientDenyList>
 ) {
   const ledgers = await tx.rawMaterialLedger.findMany({
-    where: { rawMaterialId },
+    where: { rawMaterialId, companyId },
     orderBy: [{ date: "asc" }, { id: "asc" }],
   });
 
@@ -103,10 +106,12 @@ async function rebuildRawMaterialLedgerBalances(
 async function rebuildFinishedProductLedgerBalances(
   finishedProductId: string,
   finishedProductVariantId: string | null,
+  companyId: string,
   tx: Omit<PrismaClient, ITXClientDenyList>
 ) {
   const ledgers = await tx.finishedProductLedger.findMany({
     where: {
+      companyId,
       finishedProductId,
       finishedProductVariantId: finishedProductVariantId ?? null,
     },
@@ -134,7 +139,12 @@ async function rebuildFinishedProductLedgerBalances(
 }
 
 export async function getAllWorkOrders() {
+  const session = await getAuthSession();
+  if (!session?.companyId) throw new Error("Unauthorized");
+  const companyId = session.companyId;
+
   const workOrders = await prisma.workOrder.findMany({
+    where: { companyId },
     orderBy: { createdAt: "desc" },
     include: {
       finishedProduct: {
@@ -196,8 +206,12 @@ export async function getAllWorkOrders() {
 }
 
 export async function getWorkOrderById(id: string) {
-  const workOrder = await prisma.workOrder.findUnique({
-    where: { id },
+  const session = await getAuthSession();
+  if (!session?.companyId) throw new Error("Unauthorized");
+  const companyId = session.companyId;
+
+  const workOrder = await prisma.workOrder.findFirst({
+    where: { id, companyId },
     include: {
       finishedProduct: {
         select: { id: true, name: true, unit: true },
@@ -271,6 +285,10 @@ export async function getWorkOrderById(id: string) {
 }
 
 export async function createWorkOrder(formData: FormData) {
+  const session = await getAuthSession();
+  if (!session?.companyId) throw new Error("Unauthorized");
+  const companyId = session.companyId;
+
   const workOrderName = (formData.get("workOrderName") as string | null)?.trim() ?? "";
   const finishedProductId = (formData.get("finishedProductId") as string | null) ?? "";
   const finishedProductVariantId =
@@ -301,8 +319,8 @@ export async function createWorkOrder(formData: FormData) {
 
   try {
     await prisma.$transaction(async (tx) => {
-      const finishedProduct = await tx.finishedProduct.findUnique({
-        where: { id: finishedProductId },
+      const finishedProduct = await tx.finishedProduct.findFirst({
+        where: { id: finishedProductId, companyId },
         select: { unit: true, variants: { select: { id: true } } },
       });
       if (!finishedProduct) {
@@ -342,7 +360,7 @@ export async function createWorkOrder(formData: FormData) {
 
       const materialIds = rawMaterialsInput.map((rm) => rm.rawMaterialId);
       const materials = await tx.rawMaterial.findMany({
-        where: { id: { in: materialIds } },
+        where: { id: { in: materialIds }, companyId },
         select: { id: true, quantityInStock: true },
       });
       const materialMap = new Map(materials.map((m) => [m.id, m]));
@@ -363,12 +381,14 @@ export async function createWorkOrder(formData: FormData) {
 
       const workOrder = await tx.workOrder.create({
         data: {
+          companyId,
           workOrderName,
           finishedProductId,
           finishedProductVariantId,
           plannedQuantity,
           rawMaterials: {
             create: rawMaterialsInput.map((rm) => ({
+              companyId,
               rawMaterialId: rm.rawMaterialId,
               quantityIssued: rm.quantityIssued,
             })),
@@ -377,8 +397,8 @@ export async function createWorkOrder(formData: FormData) {
       });
 
       for (const item of rawMaterialsInput) {
-        const current = await tx.rawMaterial.findUnique({
-          where: { id: item.rawMaterialId },
+        const current = await tx.rawMaterial.findFirst({
+          where: { id: item.rawMaterialId, companyId },
           select: { quantityInStock: true },
         });
         if (!current) {
@@ -397,7 +417,7 @@ export async function createWorkOrder(formData: FormData) {
         }
 
         await tx.rawMaterial.update({
-          where: { id: item.rawMaterialId },
+          where: { id: item.rawMaterialId, companyId },
           data: {
             quantityInStock: { decrement: item.quantityIssued },
           },
@@ -405,6 +425,7 @@ export async function createWorkOrder(formData: FormData) {
 
         await tx.rawMaterialLedger.create({
           data: {
+            companyId,
             rawMaterialId: item.rawMaterialId,
             openingBalance,
             quantityIn: 0,
@@ -481,6 +502,10 @@ export async function createWorkOrder(formData: FormData) {
 }
 
 export async function addProductionEntry(workOrderId: string, formData: FormData) {
+  const session = await getAuthSession();
+  if (!session?.companyId) throw new Error("Unauthorized");
+  const companyId = session.companyId;
+
   const quantityProduced = parseNumber(formData.get("quantityProduced"));
   const wasteGenerated = parseNumber(formData.get("wasteGenerated") ?? "0");
 
@@ -493,8 +518,8 @@ export async function addProductionEntry(workOrderId: string, formData: FormData
 
   try {
     await prisma.$transaction(async (tx) => {
-      const workOrder = await tx.workOrder.findUnique({
-        where: { id: workOrderId },
+      const workOrder = await tx.workOrder.findFirst({
+        where: { id: workOrderId, companyId },
         include: {
           finishedProduct: { select: { id: true, unit: true, quantityInStock: true } },
           finishedProductVariant: {
@@ -523,6 +548,7 @@ export async function addProductionEntry(workOrderId: string, formData: FormData
 
       const productionEntry = await tx.productionEntry.create({
         data: {
+          companyId,
           workOrderId,
           quantityProduced,
           wasteGenerated,
@@ -536,14 +562,14 @@ export async function addProductionEntry(workOrderId: string, formData: FormData
 
       if (workOrder.finishedProductVariant) {
         await tx.finishedProductVariant.update({
-          where: { id: workOrder.finishedProductVariant.id },
+          where: { id: workOrder.finishedProductVariant.id, companyId },
           data: {
             quantityInStock: { increment: quantityProduced },
           },
         });
       } else {
         await tx.finishedProduct.update({
-          where: { id: workOrder.finishedProductId },
+          where: { id: workOrder.finishedProductId, companyId },
           data: {
             quantityInStock: { increment: quantityProduced },
           },
@@ -552,6 +578,7 @@ export async function addProductionEntry(workOrderId: string, formData: FormData
 
       await tx.finishedProductLedger.create({
         data: {
+          companyId,
           finishedProductId: workOrder.finishedProductId,
           eventType: "PRODUCTION",
           openingBalance,
@@ -565,7 +592,7 @@ export async function addProductionEntry(workOrderId: string, formData: FormData
         },
       });
 
-      await refreshWorkOrderStatus(workOrderId, tx);
+      await refreshWorkOrderStatus(workOrderId, companyId, tx);
     }, { timeout: 20000, maxWait: 10000 });
   } catch (error: unknown) {
     console.error("updateWorkOrder error:", error);
@@ -600,6 +627,10 @@ export async function addProductionEntry(workOrderId: string, formData: FormData
 }
 
 export async function updateProductionEntry(entryId: string, formData: FormData) {
+  const session = await getAuthSession();
+  if (!session?.companyId) throw new Error("Unauthorized");
+  const companyId = session.companyId;
+
   const newQuantityProduced = parseNumber(formData.get("quantityProduced"));
   const newWasteGenerated = parseNumber(formData.get("wasteGenerated") ?? "0");
 
@@ -614,8 +645,8 @@ export async function updateProductionEntry(entryId: string, formData: FormData)
 
   try {
     await prisma.$transaction(async (tx) => {
-      const oldEntry = await tx.productionEntry.findUnique({
-        where: { id: entryId },
+      const oldEntry = await tx.productionEntry.findFirst({
+        where: { id: entryId, companyId },
         include: {
           workOrder: {
             include: {
@@ -665,7 +696,7 @@ export async function updateProductionEntry(entryId: string, formData: FormData)
       }
 
       await tx.productionEntry.update({
-        where: { id: entryId },
+        where: { id: entryId, companyId },
         data: {
           quantityProduced: newQuantityProduced,
           wasteGenerated: newWasteGenerated,
@@ -674,14 +705,14 @@ export async function updateProductionEntry(entryId: string, formData: FormData)
 
       if (finishedProductVariantId) {
         await tx.finishedProductVariant.update({
-          where: { id: finishedProductVariantId },
+          where: { id: finishedProductVariantId, companyId },
           data: {
             quantityInStock: { increment: delta },
           },
         });
       } else {
         await tx.finishedProduct.update({
-          where: { id: finishedProductId },
+          where: { id: finishedProductId, companyId },
           data: {
             quantityInStock: { increment: delta },
           },
@@ -690,6 +721,7 @@ export async function updateProductionEntry(entryId: string, formData: FormData)
 
       const linkedLedger = await tx.finishedProductLedger.findFirst({
         where: {
+          companyId,
           finishedProductId,
           finishedProductVariantId,
           productionEntryId: entryId,
@@ -708,9 +740,10 @@ export async function updateProductionEntry(entryId: string, formData: FormData)
       await rebuildFinishedProductLedgerBalances(
         finishedProductId,
         finishedProductVariantId,
+        companyId,
         tx
       );
-      await refreshWorkOrderStatus(workOrderId, tx);
+      await refreshWorkOrderStatus(workOrderId, companyId, tx);
     }, { timeout: 20000, maxWait: 10000 });
   } catch (error: unknown) {
     if (
@@ -754,6 +787,10 @@ export async function updateProductionEntry(entryId: string, formData: FormData)
 }
 
 export async function updateWorkOrder(id: string, formData: FormData) {
+  const session = await getAuthSession();
+  if (!session?.companyId) throw new Error("Unauthorized");
+  const companyId = session.companyId;
+
   const plannedQuantity = parseNumber(formData.get("plannedQuantity"));
   const rawMaterialsInput = parseJsonArray<UpdateWorkOrderRawMaterialInput>(
     formData.get("rawMaterials")
@@ -774,8 +811,8 @@ export async function updateWorkOrder(id: string, formData: FormData) {
 
   try {
     await prisma.$transaction(async (tx) => {
-      const workOrder = await tx.workOrder.findUnique({
-        where: { id },
+      const workOrder = await tx.workOrder.findFirst({
+        where: { id, companyId },
         include: {
           finishedProduct: { select: { unit: true } },
           rawMaterials: true,
@@ -811,7 +848,7 @@ export async function updateWorkOrder(id: string, formData: FormData) {
       }
 
       await tx.workOrder.update({
-        where: { id },
+        where: { id, companyId },
         data: { plannedQuantity },
       });
 
@@ -832,8 +869,8 @@ export async function updateWorkOrder(id: string, formData: FormData) {
 
         if (diff === 0) continue;
 
-        const rawMaterial = await tx.rawMaterial.findUnique({
-          where: { id: existing.rawMaterialId },
+        const rawMaterial = await tx.rawMaterial.findFirst({
+          where: { id: existing.rawMaterialId, companyId },
           select: { quantityInStock: true },
         });
         if (!rawMaterial) {
@@ -854,12 +891,13 @@ export async function updateWorkOrder(id: string, formData: FormData) {
           const closingBalance = openingBalance - diff;
 
           await tx.rawMaterial.update({
-            where: { id: existing.rawMaterialId },
+            where: { id: existing.rawMaterialId, companyId },
             data: { quantityInStock: { decrement: diff } },
           });
 
           await tx.rawMaterialLedger.create({
             data: {
+              companyId,
               rawMaterialId: existing.rawMaterialId,
               openingBalance,
               quantityIn: 0,
@@ -874,12 +912,13 @@ export async function updateWorkOrder(id: string, formData: FormData) {
           const closingBalance = openingBalance + returned;
 
           await tx.rawMaterial.update({
-            where: { id: existing.rawMaterialId },
+            where: { id: existing.rawMaterialId, companyId },
             data: { quantityInStock: { increment: returned } },
           });
 
           await tx.rawMaterialLedger.create({
             data: {
+              companyId,
               rawMaterialId: existing.rawMaterialId,
               openingBalance,
               quantityIn: returned,
@@ -892,7 +931,7 @@ export async function updateWorkOrder(id: string, formData: FormData) {
         }
 
         await tx.workOrderRawMaterial.update({
-          where: { id: existing.id },
+          where: { id: existing.id, companyId },
           data: { quantityIssued: newQty },
         });
 
@@ -900,10 +939,10 @@ export async function updateWorkOrder(id: string, formData: FormData) {
       }
 
       for (const rawMaterialId of affectedRawMaterialIds) {
-        await rebuildRawMaterialLedgerBalances(rawMaterialId, tx);
+        await rebuildRawMaterialLedgerBalances(rawMaterialId, companyId, tx);
       }
 
-      await refreshWorkOrderStatus(id, tx);
+      await refreshWorkOrderStatus(id, companyId, tx);
     }, { timeout: 20000, maxWait: 10000 });
   } catch (error: unknown) {
     if (
@@ -997,4 +1036,3 @@ export async function updateWorkOrder(id: string, formData: FormData) {
 
   revalidatePath(`/production/${id}`);
 }
-

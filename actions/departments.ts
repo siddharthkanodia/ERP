@@ -2,10 +2,16 @@
 
 import { revalidatePath } from "next/cache";
 
+import { getAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
 export async function getAllDepartments() {
+  const session = await getAuthSession();
+  if (!session?.companyId) throw new Error("Unauthorized");
+  const companyId = session.companyId;
+
   const departments = await prisma.department.findMany({
+    where: { companyId },
     orderBy: { name: "asc" },
     include: {
       _count: {
@@ -29,6 +35,10 @@ export async function getAllDepartments() {
 }
 
 export async function createDepartment(name: string) {
+  const session = await getAuthSession();
+  if (!session?.companyId) throw new Error("Unauthorized");
+  const companyId = session.companyId;
+
   const trimmed = name.trim();
   if (!trimmed) {
     return { error: "Department name must not be empty" };
@@ -36,6 +46,7 @@ export async function createDepartment(name: string) {
 
   const existing = await prisma.department.findFirst({
     where: {
+      companyId,
       name: {
         equals: trimmed,
         mode: "insensitive",
@@ -49,7 +60,7 @@ export async function createDepartment(name: string) {
   }
 
   const department = await prisma.department.create({
-    data: { name: trimmed },
+    data: { name: trimmed, companyId },
   });
 
   revalidatePath("/employees");
@@ -57,13 +68,29 @@ export async function createDepartment(name: string) {
 }
 
 export async function deleteDepartment(id: string) {
+  const session = await getAuthSession();
+  if (!session?.companyId) throw new Error("Unauthorized");
+  const companyId = session.companyId;
+
   const departmentId = id.trim();
   if (!departmentId) {
     return { error: "Invalid department id" };
   }
 
+  const existing = await prisma.department.findUnique({
+    where: { id: departmentId },
+    select: { id: true, companyId: true },
+  });
+  if (!existing) {
+    return { error: "Department not found" };
+  }
+  if (existing.companyId !== companyId) {
+    throw new Error("Forbidden");
+  }
+
   const activeEmployeesCount = await prisma.employee.count({
     where: {
+      companyId,
       departmentId,
       isDeleted: false,
       status: "ACTIVE",
@@ -81,4 +108,3 @@ export async function deleteDepartment(id: string) {
   revalidatePath("/employees");
   return { success: true };
 }
-

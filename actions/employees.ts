@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 
+import { getAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
 type EmploymentType = "PERMANENT" | "DAILY";
@@ -87,8 +88,12 @@ function validateEmployeeInput(
 }
 
 export async function getAllEmployees() {
+  const session = await getAuthSession();
+  if (!session?.companyId) throw new Error("Unauthorized");
+  const companyId = session.companyId;
+
   const employees = await prisma.employee.findMany({
-    where: { isDeleted: false },
+    where: { companyId, isDeleted: false },
     orderBy: [{ status: "asc" }, { name: "asc" }],
     include: {
       department: { select: { id: true, name: true } },
@@ -110,11 +115,15 @@ export async function getAllEmployees() {
 }
 
 export async function getEmployeeById(id: string) {
+  const session = await getAuthSession();
+  if (!session?.companyId) throw new Error("Unauthorized");
+  const companyId = session.companyId;
+
   const employeeId = id.trim();
   if (!employeeId) return null;
 
   const employee = await prisma.employee.findFirst({
-    where: { id: employeeId, isDeleted: false },
+    where: { id: employeeId, companyId, isDeleted: false },
     include: { department: true },
   });
 
@@ -138,6 +147,10 @@ export async function getEmployeeById(id: string) {
 }
 
 export async function createEmployee(data: CreateEmployeeInput) {
+  const session = await getAuthSession();
+  if (!session?.companyId) throw new Error("Unauthorized");
+  const companyId = session.companyId;
+
   const name = (data.name ?? "").trim();
   const trimmedDepartmentId = (data.departmentId ?? "").trim();
   const hireDate = toDateOrNull(data.hireDate);
@@ -157,7 +170,7 @@ export async function createEmployee(data: CreateEmployeeInput) {
   if (validationError) return { error: validationError };
 
   const department = await prisma.department.findFirst({
-    where: { id: trimmedDepartmentId },
+    where: { id: trimmedDepartmentId, companyId },
     select: { id: true },
   });
   if (!department) {
@@ -168,6 +181,7 @@ export async function createEmployee(data: CreateEmployeeInput) {
 
   const employee = await prisma.employee.create({
     data: {
+      companyId,
       name,
       phone: data.phone ?? null,
       employmentType: data.employmentType,
@@ -206,11 +220,15 @@ export async function createEmployee(data: CreateEmployeeInput) {
 }
 
 export async function updateEmployee(id: string, data: UpdateEmployeeInput) {
+  const session = await getAuthSession();
+  if (!session?.companyId) throw new Error("Unauthorized");
+  const companyId = session.companyId;
+
   const employeeId = id.trim();
   if (!employeeId) return { error: "Invalid employee id." };
 
   const existing = await prisma.employee.findFirst({
-    where: { id: employeeId, isDeleted: false },
+    where: { id: employeeId, companyId, isDeleted: false },
     select: { id: true, employmentType: true, status: true },
   });
   if (!existing) return { error: "Employee not found." };
@@ -225,7 +243,7 @@ export async function updateEmployee(id: string, data: UpdateEmployeeInput) {
 
   // Guard: do not allow changing employmentType if attendance exists.
   const attendanceCount = await prisma.attendance.count({
-    where: { employeeId },
+    where: { companyId, employeeId },
   });
   const employmentTypeChanging = data.employmentType !== existing.employmentType;
   if (attendanceCount > 0 && employmentTypeChanging) {
@@ -243,7 +261,7 @@ export async function updateEmployee(id: string, data: UpdateEmployeeInput) {
   if (validationError) return { error: validationError };
 
   const department = await prisma.department.findFirst({
-    where: { id: trimmedDepartmentId },
+    where: { id: trimmedDepartmentId, companyId },
     select: { id: true },
   });
   if (!department) {
@@ -254,7 +272,7 @@ export async function updateEmployee(id: string, data: UpdateEmployeeInput) {
     (data.status ?? existing.status) as EmployeeStatus;
 
   const employee = await prisma.employee.update({
-    where: { id: employeeId },
+    where: { id: employeeId, companyId },
     data: {
       name,
       phone: data.phone ?? null,
@@ -296,11 +314,15 @@ export async function updateEmployee(id: string, data: UpdateEmployeeInput) {
 }
 
 export async function setEmployeeStatus(id: string, status: EmployeeStatus) {
+  const session = await getAuthSession();
+  if (!session?.companyId) throw new Error("Unauthorized");
+  const companyId = session.companyId;
+
   const employeeId = id.trim();
   if (!employeeId) return { error: "Invalid employee id." };
 
   await prisma.employee.update({
-    where: { id: employeeId },
+    where: { id: employeeId, companyId },
     data: { status },
   });
 
@@ -309,11 +331,15 @@ export async function setEmployeeStatus(id: string, status: EmployeeStatus) {
 }
 
 export async function deleteEmployee(id: string) {
+  const session = await getAuthSession();
+  if (!session?.companyId) throw new Error("Unauthorized");
+  const companyId = session.companyId;
+
   const employeeId = id.trim();
   if (!employeeId) return { error: "Invalid employee id." };
 
   await prisma.employee.update({
-    where: { id: employeeId },
+    where: { id: employeeId, companyId },
     data: { isDeleted: true, deletedAt: new Date() },
   });
 
@@ -322,6 +348,10 @@ export async function deleteEmployee(id: string) {
 }
 
 export async function searchEmployees(query: string) {
+  const session = await getAuthSession();
+  if (!session?.companyId) throw new Error("Unauthorized");
+  const companyId = session.companyId;
+
   const q = (query ?? "").trim();
   if (!q) {
     return [];
@@ -329,6 +359,7 @@ export async function searchEmployees(query: string) {
 
   const employees = await prisma.employee.findMany({
     where: {
+      companyId,
       isDeleted: false,
       OR: [
         { name: { contains: q, mode: "insensitive" } },
@@ -354,11 +385,15 @@ export async function searchEmployees(query: string) {
 }
 
 export async function getLeavesByEmployee(employeeId: string) {
+  const session = await getAuthSession();
+  if (!session?.companyId) throw new Error("Unauthorized");
+  const companyId = session.companyId;
+
   const employeeIdTrimmed = employeeId.trim();
   if (!employeeIdTrimmed) return [];
 
   const leaves = await prisma.leave.findMany({
-    where: { employeeId: employeeIdTrimmed },
+    where: { companyId, employeeId: employeeIdTrimmed },
     orderBy: { startDate: "desc" },
     select: {
       id: true,
@@ -381,6 +416,10 @@ export async function getLeavesByEmployee(employeeId: string) {
 }
 
 export async function createLeave(data: CreateLeaveInput) {
+  const session = await getAuthSession();
+  if (!session?.companyId) throw new Error("Unauthorized");
+  const companyId = session.companyId;
+
   const employeeId = data.employeeId.trim();
   if (!employeeId) return { error: "Invalid employee id" };
 
@@ -396,6 +435,7 @@ export async function createLeave(data: CreateLeaveInput) {
   const employee = await prisma.employee.findFirst({
     where: {
       id: employeeId,
+      companyId,
       isDeleted: false,
       status: "ACTIVE",
     },
@@ -409,6 +449,7 @@ export async function createLeave(data: CreateLeaveInput) {
   // Overlap check: startA <= endB AND endA >= startB
   const overlapping = await prisma.leave.findFirst({
     where: {
+      companyId,
       employeeId,
       startDate: { lte: endDate },
       endDate: { gte: startDate },
@@ -422,6 +463,7 @@ export async function createLeave(data: CreateLeaveInput) {
 
   const leave = await prisma.leave.create({
     data: {
+      companyId,
       employeeId,
       leaveType: data.leaveType,
       startDate,
@@ -437,11 +479,15 @@ export async function createLeave(data: CreateLeaveInput) {
 }
 
 export async function deleteLeave(id: string) {
+  const session = await getAuthSession();
+  if (!session?.companyId) throw new Error("Unauthorized");
+  const companyId = session.companyId;
+
   const leaveId = id.trim();
   if (!leaveId) return { error: "Invalid leave id" };
 
   const existing = await prisma.leave.findFirst({
-    where: { id: leaveId },
+    where: { id: leaveId, companyId },
     select: { id: true, employeeId: true },
   });
 
@@ -457,4 +503,3 @@ export async function deleteLeave(id: string) {
 
   return { success: true };
 }
-

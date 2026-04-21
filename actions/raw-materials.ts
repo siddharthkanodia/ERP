@@ -1,11 +1,16 @@
 "use server";
 
 import { LedgerEventType } from "@prisma/client";
+import { getAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
 export async function createRawMaterial(formData: FormData) {
+  const session = await getAuthSession();
+  if (!session?.companyId) throw new Error("Unauthorized");
+  const companyId = session.companyId;
+
   const name = formData.get("name") as string;
   const rawInitialQuantity = formData.get("initialQuantity");
   const initialQuantity =
@@ -23,6 +28,7 @@ export async function createRawMaterial(formData: FormData) {
   try {
     await prisma.rawMaterial.create({
       data: {
+        companyId,
         name: name.trim(),
         quantityInStock: initialQuantity,
       },
@@ -44,6 +50,10 @@ export async function createRawMaterial(formData: FormData) {
 }
 
 export async function receiveRawMaterial(formData: FormData) {
+  const session = await getAuthSession();
+  if (!session?.companyId) throw new Error("Unauthorized");
+  const companyId = session.companyId;
+
   const id = formData.get("id") as string;
   const quantity = parseFloat(formData.get("quantity") as string);
   const receivedDateRaw = (formData.get("receivedDate") as string | null) ?? "";
@@ -62,8 +72,8 @@ export async function receiveRawMaterial(formData: FormData) {
 
   try {
     await prisma.$transaction(async (tx) => {
-      const material = await tx.rawMaterial.findUnique({
-        where: { id },
+      const material = await tx.rawMaterial.findFirst({
+        where: { id, companyId },
         select: { quantityInStock: true },
       });
 
@@ -75,7 +85,7 @@ export async function receiveRawMaterial(formData: FormData) {
       const closingBalance = openingBalance + quantity;
 
       await tx.rawMaterial.update({
-        where: { id },
+        where: { id, companyId },
         data: {
           quantityInStock: { increment: quantity },
           lastReceivedAt: receivedDate,
@@ -85,6 +95,7 @@ export async function receiveRawMaterial(formData: FormData) {
 
       await tx.rawMaterialLedger.create({
         data: {
+          companyId,
           rawMaterialId: id,
           date: receivedDate,
           eventType: LedgerEventType.RECEIPT,
@@ -125,6 +136,10 @@ export type ReceiveStockBatchInput = {
 export async function receiveStockBatch(
   input: ReceiveStockBatchInput
 ): Promise<{ error: string } | void> {
+  const session = await getAuthSession();
+  if (!session?.companyId) throw new Error("Unauthorized");
+  const companyId = session.companyId;
+
   const receivedDate = new Date(input.receivedDate);
 
   if (!input.items?.length) {
@@ -154,15 +169,18 @@ export async function receiveStockBatch(
   try {
     await prisma.$transaction(async (tx) => {
       for (const item of input.items) {
-        const material = await tx.rawMaterial.findUniqueOrThrow({
-          where: { id: item.materialId },
+        const material = await tx.rawMaterial.findFirst({
+          where: { id: item.materialId, companyId },
         });
+        if (!material) {
+          throw Object.assign(new Error("Not found"), { code: "P2025" });
+        }
 
         const opening = Number(material.quantityInStock);
         const closing = opening + item.quantity;
 
         await tx.rawMaterial.update({
-          where: { id: item.materialId },
+          where: { id: item.materialId, companyId },
           data: {
             quantityInStock: closing,
             lastReceivedAt: receivedDate,
@@ -172,6 +190,7 @@ export async function receiveStockBatch(
 
         await tx.rawMaterialLedger.create({
           data: {
+            companyId,
             rawMaterialId: item.materialId,
             date: receivedDate,
             eventType: LedgerEventType.RECEIPT,
@@ -202,7 +221,12 @@ export async function receiveStockBatch(
 }
 
 export async function getAllRawMaterials() {
+  const session = await getAuthSession();
+  if (!session?.companyId) throw new Error("Unauthorized");
+  const companyId = session.companyId;
+
   const materials = await prisma.rawMaterial.findMany({
+    where: { companyId },
     orderBy: { name: "asc" },
   });
 
@@ -216,11 +240,18 @@ export async function getAllRawMaterials() {
 }
 
 export async function getRawMaterialById(id: string) {
+  const session = await getAuthSession();
+  if (!session?.companyId) throw new Error("Unauthorized");
+  const companyId = session.companyId;
+
   const material = await prisma.rawMaterial.findUnique({
     where: { id },
   });
 
   if (!material) return null;
+  if (material.companyId !== companyId) {
+    throw new Error("Forbidden");
+  }
 
   return {
     ...material,
@@ -232,6 +263,10 @@ export async function getRawMaterialById(id: string) {
 }
 
 export async function updateRawMaterial(id: string, formData: FormData) {
+  const session = await getAuthSession();
+  if (!session?.companyId) throw new Error("Unauthorized");
+  const companyId = session.companyId;
+
   const name = (formData.get("name") as string | null)?.trim() ?? "";
 
   if (!name) {
@@ -240,7 +275,7 @@ export async function updateRawMaterial(id: string, formData: FormData) {
 
   try {
     await prisma.rawMaterial.update({
-      where: { id },
+      where: { id, companyId },
       data: {
         name,
       },
@@ -272,8 +307,12 @@ export async function updateRawMaterial(id: string, formData: FormData) {
 }
 
 export async function getRawMaterialLedger(id: string) {
+  const session = await getAuthSession();
+  if (!session?.companyId) throw new Error("Unauthorized");
+  const companyId = session.companyId;
+
   const entries = await prisma.rawMaterialLedger.findMany({
-    where: { rawMaterialId: id },
+    where: { rawMaterialId: id, companyId },
     orderBy: [{ date: "desc" }, { createdAt: "desc" }],
   });
 

@@ -1,12 +1,10 @@
 import {
   eachDayOfInterval,
-  endOfDay,
   endOfMonth,
   format,
-  startOfDay,
-  startOfMonth,
 } from "date-fns";
 
+import { getAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
 export type FinishedGoodsInventoryReportRow = {
@@ -18,19 +16,8 @@ export type FinishedGoodsInventoryReportRow = {
   closing: number;
 };
 
-function toISODateKeyLocal(d: Date) {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
-
 function round2(n: number) {
   return Math.round(n * 100) / 100;
-}
-
-function add2(n: number, delta: number) {
-  return round2(n + delta);
 }
 
 const IST_OFFSET_MS = 330 * 60 * 1000;
@@ -83,6 +70,10 @@ export type FinishedGoodsReportRangeInput = {
 export async function getFinishedGoodsReportRange(
   input: FinishedGoodsReportRangeInput
 ): Promise<FinishedGoodsInventoryReportRow[]> {
+  const session = await getAuthSession();
+  if (!session?.companyId) throw new Error("Unauthorized");
+  const companyId = session.companyId;
+
   const fromMonth = Number(input.fromMonth);
   const fromYear = Number(input.fromYear);
   const toMonth = Number(input.toMonth);
@@ -101,7 +92,7 @@ export async function getFinishedGoodsReportRange(
   if (dbEnd.getTime() < dbStart.getTime()) return [];
 
   const product = await prisma.finishedProduct.findFirst({
-    where: { id: productId, isDeleted: false },
+    where: { id: productId, companyId, isDeleted: false },
     select: {
       id: true,
       quantityInStock: true,
@@ -123,6 +114,7 @@ export async function getFinishedGoodsReportRange(
   const [prodInRange, dispInRange, prodAfter, dispAfter] = await Promise.all([
     prisma.finishedProductLedger.findMany({
       where: {
+        companyId,
         finishedProductId: productId,
         eventType: "PRODUCTION",
         date: { gte: dbStart, lte: dbEnd },
@@ -131,6 +123,7 @@ export async function getFinishedGoodsReportRange(
     }),
     prisma.finishedProductLedger.findMany({
       where: {
+        companyId,
         finishedProductId: productId,
         eventType: "DISPATCH",
         date: { gte: dbStart, lte: dbEnd },
@@ -139,6 +132,7 @@ export async function getFinishedGoodsReportRange(
     }),
     prisma.finishedProductLedger.findMany({
       where: {
+        companyId,
         finishedProductId: productId,
         eventType: "PRODUCTION",
         date: { gt: dbEnd, lte: now },
@@ -147,6 +141,7 @@ export async function getFinishedGoodsReportRange(
     }),
     prisma.finishedProductLedger.findMany({
       where: {
+        companyId,
         finishedProductId: productId,
         eventType: "DISPATCH",
         date: { gt: dbEnd, lte: now },
@@ -229,6 +224,10 @@ export async function getRawMaterialReport(
   toYear: number,
   materialId: string
 ): Promise<RawMaterialInventoryReportRow[]> {
+  const session = await getAuthSession();
+  if (!session?.companyId) throw new Error("Unauthorized");
+  const companyId = session.companyId;
+
   const { dbStart, dbEnd, uiStart, uiEnd } = getISTRange(
     fromMonth,
     fromYear,
@@ -242,6 +241,7 @@ export async function getRawMaterialReport(
   const [latestBeforeRange, ledgerInRange] = await Promise.all([
     prisma.rawMaterialLedger.findFirst({
       where: {
+        companyId,
         rawMaterialId: materialId,
         createdAt: { lt: dbStart },
       },
@@ -250,6 +250,7 @@ export async function getRawMaterialReport(
     }),
     prisma.rawMaterialLedger.findMany({
       where: {
+        companyId,
         rawMaterialId: materialId,
         createdAt: { gte: dbStart, lte: dbEnd },
       },
@@ -352,10 +353,15 @@ function round2FromNumber(n: number) {
 export async function getProductionEfficiencyReport(
   year: number
 ): Promise<ProductionEfficiencyReport> {
+  const session = await getAuthSession();
+  if (!session?.companyId) throw new Error("Unauthorized");
+  const companyId = session.companyId;
+
   const start = new Date(year, 0, 1, 0, 0, 0, 0);
   const end = new Date(year, 11, 31, 23, 59, 59, 999);
 
   const rawMaterials = await prisma.rawMaterial.findMany({
+    where: { companyId },
     select: { id: true, name: true },
     orderBy: { name: "asc" },
   });
@@ -384,6 +390,7 @@ export async function getProductionEfficiencyReport(
 
   const workOrders = await prisma.workOrder.findMany({
     where: {
+      companyId,
       status: "COMPLETED",
       completedAt: { gte: start, lte: end },
     },
@@ -481,4 +488,3 @@ export async function getProductionEfficiencyReport(
 
   return { rawMaterials, rows };
 }
-

@@ -9,6 +9,7 @@ import {
   Users,
   ClipboardList,
   BarChart3,
+  LogOut,
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -80,6 +81,21 @@ export function Sidebar() {
             );
           })}
         </nav>
+
+        <div className="border-t px-2 py-2">
+          <form action="/auth/logout" method="POST">
+            <button
+              type="submit"
+              className={cn(
+                "flex w-full items-center gap-2 rounded-md border border-transparent px-2 py-2 text-sm text-zinc-700 transition-colors",
+                "hover:bg-white hover:text-foreground"
+              )}
+            >
+              <LogOut className="size-4" />
+              <span>Logout</span>
+            </button>
+          </form>
+        </div>
       </div>
     </aside>
   );

@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 
+import { getAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
 type AttendanceStatus =
@@ -111,6 +112,10 @@ export async function getAttendanceByEmployee(
   employeeId: string,
   month?: Date
 ): Promise<AttendanceSerialized[]> {
+  const session = await getAuthSession();
+  if (!session?.companyId) throw new Error("Unauthorized");
+  const companyId = session.companyId;
+
   const empId = employeeId.trim();
   if (!empId) return [];
 
@@ -126,6 +131,7 @@ export async function getAttendanceByEmployee(
 
   const records = await prisma.attendance.findMany({
     where: {
+      companyId,
       employeeId: empId,
       date: { gte: range.start, lte: range.end },
     },
@@ -136,12 +142,17 @@ export async function getAttendanceByEmployee(
 }
 
 export async function markAttendance(data: MarkAttendanceInput) {
+  const session = await getAuthSession();
+  if (!session?.companyId) throw new Error("Unauthorized");
+  const companyId = session.companyId;
+
   const employeeId = data.employeeId.trim();
   if (!employeeId) return { error: "Invalid employee id" };
 
   const employee = await prisma.employee.findFirst({
     where: {
       id: employeeId,
+      companyId,
       isDeleted: false,
       status: "ACTIVE",
     },
@@ -180,12 +191,12 @@ export async function markAttendance(data: MarkAttendanceInput) {
 
   // Prisma composite unique naming differs across versions; using a safe read-then-write transaction.
   const existing = await prisma.attendance.findFirst({
-    where: { employeeId, date: dateOnly },
+    where: { companyId, employeeId, date: dateOnly },
   });
 
   const attendance = existing
     ? await prisma.attendance.update({
-        where: { id: existing.id },
+        where: { id: existing.id, companyId },
         data: {
           status: data.status,
           checkIn,
@@ -197,6 +208,7 @@ export async function markAttendance(data: MarkAttendanceInput) {
       })
     : await prisma.attendance.create({
         data: {
+          companyId,
           employeeId,
           date: dateOnly,
           status: data.status,
@@ -216,12 +228,17 @@ export async function getAttendanceSummary(
   employeeId: string,
   month: Date
 ): Promise<AttendanceSummary> {
+  const session = await getAuthSession();
+  if (!session?.companyId) throw new Error("Unauthorized");
+  const companyId = session.companyId;
+
   const empId = employeeId.trim();
   const start = startOfMonth(month);
   const end = endOfMonth(month);
 
   const records = await prisma.attendance.findMany({
     where: {
+      companyId,
       employeeId: empId,
       date: { gte: start, lte: end },
     },
@@ -266,11 +283,15 @@ export async function getAttendanceSummary(
 }
 
 export async function deleteAttendanceRecord(id: string) {
+  const session = await getAuthSession();
+  if (!session?.companyId) throw new Error("Unauthorized");
+  const companyId = session.companyId;
+
   const attendanceId = id.trim();
   if (!attendanceId) return { error: "Invalid attendance id" };
 
   const existing = await prisma.attendance.findFirst({
-    where: { id: attendanceId },
+    where: { id: attendanceId, companyId },
     select: { id: true, employeeId: true },
   });
 
@@ -288,6 +309,10 @@ export async function deleteAttendanceRecord(id: string) {
 }
 
 export async function getDailyAttendance(date: Date) {
+  const session = await getAuthSession();
+  if (!session?.companyId) throw new Error("Unauthorized");
+  const companyId = session.companyId;
+
   const target = startOfDay(date);
   const targetEnd = new Date(
     target.getFullYear(),
@@ -301,6 +326,7 @@ export async function getDailyAttendance(date: Date) {
 
   const employees = await prisma.employee.findMany({
     where: {
+      companyId,
       isDeleted: false,
       status: "ACTIVE",
       hireDate: { lte: target },
@@ -324,6 +350,7 @@ export async function getDailyAttendance(date: Date) {
   let [attendanceRows, leaveRows] = await Promise.all([
     prisma.attendance.findMany({
       where: {
+        companyId,
         employeeId: { in: employeeIds },
         date: {
           gte: target,
@@ -343,6 +370,7 @@ export async function getDailyAttendance(date: Date) {
     }),
     prisma.leave.findMany({
       where: {
+        companyId,
         employeeId: { in: employeeIds },
         startDate: { lte: targetEnd },
         endDate: { gte: target },
@@ -360,6 +388,7 @@ export async function getDailyAttendance(date: Date) {
         for (const employeeId of missingEmployeeIds) {
           const existing = await tx.attendance.findFirst({
             where: {
+              companyId,
               employeeId,
               date: {
                 gte: target,
@@ -371,7 +400,7 @@ export async function getDailyAttendance(date: Date) {
 
           if (existing) {
             await tx.attendance.update({
-              where: { id: existing.id },
+              where: { id: existing.id, companyId },
               data: {
                 status: "HOLIDAY",
                 checkIn: null,
@@ -383,6 +412,7 @@ export async function getDailyAttendance(date: Date) {
           } else {
             await tx.attendance.create({
               data: {
+                companyId,
                 employeeId,
                 date: target,
                 status: "HOLIDAY",
@@ -401,6 +431,7 @@ export async function getDailyAttendance(date: Date) {
       [attendanceRows, leaveRows] = await Promise.all([
         prisma.attendance.findMany({
           where: {
+            companyId,
             employeeId: { in: employeeIds },
             date: {
               gte: target,
@@ -420,6 +451,7 @@ export async function getDailyAttendance(date: Date) {
         }),
         prisma.leave.findMany({
           where: {
+            companyId,
             employeeId: { in: employeeIds },
             startDate: { lte: targetEnd },
             endDate: { gte: target },
@@ -476,6 +508,10 @@ export async function getDailyAttendance(date: Date) {
 }
 
 export async function upsertAttendance(data: UpsertAttendanceInput) {
+  const session = await getAuthSession();
+  if (!session?.companyId) throw new Error("Unauthorized");
+  const companyId = session.companyId;
+
   const employeeId = data.employeeId.trim();
   if (!employeeId) return { error: "Invalid employee id" };
 
@@ -527,12 +563,12 @@ export async function upsertAttendance(data: UpsertAttendanceInput) {
   }
 
   const existing = await prisma.attendance.findFirst({
-    where: { employeeId, date: dateOnly },
+    where: { companyId, employeeId, date: dateOnly },
   });
 
   const attendance = existing
     ? await prisma.attendance.update({
-        where: { id: existing.id },
+        where: { id: existing.id, companyId },
         data: {
           status: data.status,
           checkIn: checkInDate,
@@ -544,6 +580,7 @@ export async function upsertAttendance(data: UpsertAttendanceInput) {
       })
     : await prisma.attendance.create({
         data: {
+          companyId,
           employeeId,
           date: dateOnly,
           status: data.status,
@@ -560,6 +597,10 @@ export async function upsertAttendance(data: UpsertAttendanceInput) {
 }
 
 export async function upsertBulkAttendance(records: UpsertAttendanceInput[]) {
+  const session = await getAuthSession();
+  if (!session?.companyId) throw new Error("Unauthorized");
+  const companyId = session.companyId;
+
   if (records.length === 0) return { success: true, count: 0 };
 
   await prisma.$transaction(async (tx) => {
@@ -615,12 +656,12 @@ export async function upsertBulkAttendance(records: UpsertAttendanceInput[]) {
       }
 
       const existing = await tx.attendance.findFirst({
-        where: { employeeId, date: dateOnly },
+        where: { companyId, employeeId, date: dateOnly },
       });
 
       if (existing) {
         await tx.attendance.update({
-          where: { id: existing.id },
+          where: { id: existing.id, companyId },
           data: {
             status: record.status,
             checkIn: checkInDate,
@@ -633,6 +674,7 @@ export async function upsertBulkAttendance(records: UpsertAttendanceInput[]) {
       } else {
         await tx.attendance.create({
           data: {
+            companyId,
             employeeId,
             date: dateOnly,
             status: record.status,
@@ -652,10 +694,15 @@ export async function upsertBulkAttendance(records: UpsertAttendanceInput[]) {
 }
 
 export async function markDayAsHoliday(date: Date) {
+  const session = await getAuthSession();
+  if (!session?.companyId) throw new Error("Unauthorized");
+  const companyId = session.companyId;
+
   const dateOnly = startOfDay(date);
 
   const employees = await prisma.employee.findMany({
     where: {
+      companyId,
       isDeleted: false,
       status: "ACTIVE",
     },
@@ -670,13 +717,13 @@ export async function markDayAsHoliday(date: Date) {
   await prisma.$transaction(async (tx) => {
     for (const employee of employees) {
       const existing = await tx.attendance.findFirst({
-        where: { employeeId: employee.id, date: dateOnly },
+        where: { companyId, employeeId: employee.id, date: dateOnly },
         select: { id: true },
       });
 
       if (existing) {
         await tx.attendance.update({
-          where: { id: existing.id },
+          where: { id: existing.id, companyId },
           data: {
             status: "HOLIDAY",
             checkIn: null,
@@ -689,6 +736,7 @@ export async function markDayAsHoliday(date: Date) {
       } else {
         await tx.attendance.create({
           data: {
+            companyId,
             employeeId: employee.id,
             date: dateOnly,
             status: "HOLIDAY",
@@ -706,4 +754,3 @@ export async function markDayAsHoliday(date: Date) {
   revalidatePath("/attendance");
   return { success: true, count: employees.length };
 }
-
