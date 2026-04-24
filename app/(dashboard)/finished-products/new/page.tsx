@@ -32,7 +32,7 @@ export default function NewFinishedProductPage() {
     Array<{
       key: string;
       name: string;
-      weightInGrams: string;
+      weightPerPiece: string;
       initialQuantity: string;
     }>
   >([]);
@@ -71,7 +71,7 @@ export default function NewFinishedProductPage() {
       const normalizedVariants = variants.map((variant) => ({
         clientKey: variant.key,
         name: variant.name.trim(),
-        weightInGrams: parseFloat(variant.weightInGrams),
+        weightPerPiece: parseFloat(variant.weightPerPiece),
         initialQuantity: parseFloat(variant.initialQuantity || "0"),
       }));
       const variantNames = new Set<string>();
@@ -79,8 +79,8 @@ export default function NewFinishedProductPage() {
         if (!variant.name) {
           return { variantError: "Variant name is required for all variant rows." };
         }
-        if (!Number.isFinite(variant.weightInGrams) || variant.weightInGrams <= 0) {
-          return { variantError: "Variant weight must be greater than 0 grams." };
+        if (!Number.isFinite(variant.weightPerPiece) || variant.weightPerPiece <= 0) {
+          return { variantError: "Weight must be greater than 0." };
         }
         if (!Number.isFinite(variant.initialQuantity) || variant.initialQuantity < 0) {
           return {
@@ -232,7 +232,7 @@ export default function NewFinishedProductPage() {
         {unit === "PIECE" && variants.length === 0 ? (
           <div className="space-y-1.5">
             <label htmlFor="weightPerPiece" className="text-sm font-medium">
-              Weight per Piece (g)
+              Weight per Piece (kg)
             </label>
             <input
               id="weightPerPiece"
@@ -240,13 +240,13 @@ export default function NewFinishedProductPage() {
               type="number"
               min="0.01"
               step="0.01"
-              placeholder="e.g. 250"
+              placeholder="e.g. 0.25"
               value={weightPerPiece}
               onChange={(e) => setWeightPerPiece(e.target.value)}
               className="h-9 w-full rounded-md border bg-background px-3 py-2 text-sm outline-none ring-ring/50 focus-visible:ring-2"
             />
             <p className="text-xs text-muted-foreground">
-              Weight of a single unit in grams. Cannot be changed after saving.
+              Weight of a single unit in kg. Cannot be changed after saving.
             </p>
             {state.weightPerPieceError ? (
               <p className="text-sm text-destructive">{state.weightPerPieceError}</p>
@@ -267,13 +267,13 @@ export default function NewFinishedProductPage() {
                         {
                           key: crypto.randomUUID(),
                           name: "",
-                          weightInGrams: "",
+                          weightPerPiece: "",
                           initialQuantity: "",
                         },
                         {
                           key: crypto.randomUUID(),
                           name: "",
-                          weightInGrams: "",
+                          weightPerPiece: "",
                           initialQuantity: "",
                         },
                       ]
@@ -282,7 +282,7 @@ export default function NewFinishedProductPage() {
                         {
                           key: crypto.randomUUID(),
                           name: "",
-                          weightInGrams: "",
+                          weightPerPiece: "",
                           initialQuantity: "",
                         },
                       ]
@@ -372,18 +372,18 @@ export default function NewFinishedProductPage() {
                   </div>
                   <div className="space-y-1">
                     <label className="text-xs font-medium text-muted-foreground">
-                      Weight (grams)
+                      Weight (kg)
                     </label>
                     <input
                       type="number"
-                      step="1"
-                      min="1"
-                      value={variant.weightInGrams}
+                      step="0.01"
+                      min="0.01"
+                      value={variant.weightPerPiece}
                       onChange={(e) =>
                         setVariants((prev) =>
                           prev.map((row) =>
                             row.key === variant.key
-                              ? { ...row, weightInGrams: e.target.value }
+                              ? { ...row, weightPerPiece: e.target.value }
                               : row
                           )
                         )
@@ -391,8 +391,8 @@ export default function NewFinishedProductPage() {
                       className="h-9 w-full rounded-md border bg-background px-3 py-2 text-sm outline-none ring-ring/50 focus-visible:ring-2"
                     />
                     {(() => {
-                      const grams = parseFloat(variant.weightInGrams);
-                      return Number.isFinite(grams) && grams > 0 ? null : (
+                      const weightKg = parseFloat(variant.weightPerPiece);
+                      return Number.isFinite(weightKg) && weightKg > 0 ? null : (
                         <p className="text-xs text-destructive">
                           Weight must be greater than 0.
                         </p>
@@ -428,7 +428,7 @@ export default function NewFinishedProductPage() {
             variants.map((variant) => ({
               clientKey: variant.key,
               name: variant.name.trim(),
-              weightInGrams: parseFloat(variant.weightInGrams || "0"),
+              weightPerPiece: parseFloat(variant.weightPerPiece || "0"),
               initialQuantity: parseFloat(variant.initialQuantity || "0"),
             }))
           )}

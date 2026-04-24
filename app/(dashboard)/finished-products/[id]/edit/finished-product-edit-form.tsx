@@ -26,7 +26,7 @@ type Props = {
   initialVariants: Array<{
     id: string;
     name: string;
-    weightInGrams: number;
+    weightPerPiece: number;
     quantityInStock: number;
   }>;
 };
@@ -57,7 +57,7 @@ export function EditFinishedProductForm({
       key: string;
       id?: string;
       name: string;
-      weightInGrams: string;
+      weightPerPiece: string;
       stock: string;
       quantityInStock: number;
       markedForDelete: boolean;
@@ -67,9 +67,9 @@ export function EditFinishedProductForm({
       key: variant.id,
       id: variant.id,
       name: variant.name ?? "",
-      weightInGrams:
-        variant.weightInGrams != null
-          ? String(variant.weightInGrams)
+      weightPerPiece:
+        variant.weightPerPiece != null
+          ? String(variant.weightPerPiece)
           : "",
       stock: String(Number(variant.quantityInStock) || 0),
       quantityInStock: Number(variant.quantityInStock) || 0,
@@ -106,10 +106,10 @@ export function EditFinishedProductForm({
     const seenNames = new Set<string>();
     for (const variant of visibleVariants) {
       const variantName = (variant.name ?? "").trim();
-      const weightInGrams = parseFloat(variant.weightInGrams);
+      const weightPerPiece = parseFloat(variant.weightPerPiece);
       if (!variantName) return "Variant name is required for all variant rows.";
-      if (!Number.isFinite(weightInGrams) || weightInGrams <= 0) {
-        return "Variant weight must be greater than 0 grams.";
+      if (!Number.isFinite(weightPerPiece) || weightPerPiece <= 0) {
+        return "Weight must be greater than 0.";
       }
       if (!isExistingVariantRow(variant) && !isMigrationScenario) {
         const initialQty = parseFloat(variant.stock ?? "0");
@@ -153,7 +153,7 @@ export function EditFinishedProductForm({
           const base = {
             clientKey: variant.key,
             name: (variant.name ?? "").trim(),
-            weightInGrams: parseFloat(variant.weightInGrams || "0"),
+            weightPerPiece: parseFloat(variant.weightPerPiece || "0"),
             _delete: variant.markedForDelete,
           };
           if (isExistingVariantRow(variant)) {
@@ -325,7 +325,7 @@ export function EditFinishedProductForm({
                 {
                   key: `new_${crypto.randomUUID()}`,
                   name: "",
-                  weightInGrams: "",
+                  weightPerPiece: "",
                   stock: "",
                   quantityInStock: 0,
                   markedForDelete: false,
@@ -379,18 +379,18 @@ export function EditFinishedProductForm({
                     </div>
                     <div className="space-y-1">
                       <label className="text-xs font-medium text-muted-foreground">
-                        Weight (grams)
+                        Weight (kg)
                       </label>
                       <input
                         type="number"
-                        step="1"
-                        min="1"
-                        value={variant.weightInGrams ?? ""}
+                        step="0.01"
+                        min="0.01"
+                        value={variant.weightPerPiece ?? ""}
                         onChange={(e) =>
                           setVariants((prev) =>
                             prev.map((row) =>
                               row.key === variant.key
-                                ? { ...row, weightInGrams: e.target.value }
+                                ? { ...row, weightPerPiece: e.target.value }
                                 : row
                             )
                           )
@@ -398,8 +398,8 @@ export function EditFinishedProductForm({
                         className="h-9 w-full rounded-md border bg-background px-3 py-2 text-sm outline-none ring-ring/50 focus-visible:ring-2"
                       />
                       {(() => {
-                        const grams = parseFloat(variant.weightInGrams ?? "");
-                        return Number.isFinite(grams) && grams > 0 ? null : (
+                        const weightKg = parseFloat(variant.weightPerPiece ?? "");
+                        return Number.isFinite(weightKg) && weightKg > 0 ? null : (
                           <p className="text-xs text-destructive">
                             Weight must be greater than 0.
                           </p>
@@ -524,7 +524,7 @@ export function EditFinishedProductForm({
                   <div className="text-sm">
                     <p className="font-medium">{variant.name || "Unnamed Variant"}</p>
                     <p className="text-xs text-muted-foreground">
-                      Weight: {variant.weightInGrams || "0"} grams
+                      Weight: {variant.weightPerPiece || "0"} kg
                     </p>
                   </div>
                   <div className="space-y-1">

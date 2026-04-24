@@ -10,7 +10,7 @@ type VariantInput = {
   id?: string;
   clientKey?: string;
   name: string;
-  weightInGrams: number;
+  weightPerPiece: number;
   initialQuantity?: number;
   quantityInStock?: number;
   _delete?: boolean;
@@ -28,7 +28,7 @@ function parseVariantsInput(raw: FormDataEntryValue | null): VariantInput[] {
     if (!Array.isArray(parsed)) return [];
     return parsed.map((item) => {
       if (!item || typeof item !== "object") {
-        return { name: "", weightInGrams: Number.NaN };
+        return { name: "", weightPerPiece: Number.NaN };
       }
       const typed = item as Record<string, unknown>;
       return {
@@ -38,10 +38,10 @@ function parseVariantsInput(raw: FormDataEntryValue | null): VariantInput[] {
             ? typed.clientKey
             : undefined,
         name: typeof typed.name === "string" ? typed.name.trim() : "",
-        weightInGrams:
-          typeof typed.weightInGrams === "number"
-            ? typed.weightInGrams
-            : parseFloat(String(typed.weightInGrams ?? "")),
+        weightPerPiece:
+          typeof typed.weightPerPiece === "number"
+            ? typed.weightPerPiece
+            : parseFloat(String(typed.weightPerPiece ?? "")),
         initialQuantity:
           typeof typed.initialQuantity === "number"
             ? typed.initialQuantity
@@ -129,6 +129,27 @@ async function rebuildFinishedProductLedgerBalances(
   await Promise.all(updates);
 }
 
+async function ensureDefaultWasteType(companyId: string) {
+  const existing = await prisma.finishedProduct.findFirst({
+    where: { companyId, isDeleted: false, isWaste: true },
+    select: { id: true },
+  });
+
+  if (existing) return existing.id;
+
+  const created = await prisma.finishedProduct.create({
+    data: {
+      companyId,
+      name: "Mixed Waste",
+      unit: "KG",
+      isWaste: true,
+      quantityInStock: 0,
+    },
+    select: { id: true },
+  });
+  return created.id;
+}
+
 export async function createFinishedProduct(formData: FormData) {
   const session = await getAuthSession();
   if (!session?.companyId) throw new Error("Unauthorized");
@@ -153,6 +174,7 @@ export async function createFinishedProduct(formData: FormData) {
       companyId,
       name: { equals: name.trim(), mode: "insensitive" },
       isDeleted: false,
+      isWaste: false,
     },
     select: { id: true },
   });
@@ -193,8 +215,8 @@ export async function createFinishedProduct(formData: FormData) {
       if (!variant.name) {
         return { error: "Variant name is required for all variant rows." };
       }
-      if (!Number.isFinite(variant.weightInGrams) || variant.weightInGrams <= 0) {
-        return { error: "Variant weight must be greater than 0 grams." };
+      if (!Number.isFinite(variant.weightPerPiece) || variant.weightPerPiece <= 0) {
+        return { error: "Weight must be greater than 0." };
       }
       const initialQuantity = variant.initialQuantity ?? Number.NaN;
       if (!Number.isFinite(initialQuantity) || initialQuantity < 0) {
@@ -218,6 +240,7 @@ export async function createFinishedProduct(formData: FormData) {
           companyId,
           name: name.trim(),
           unit,
+          isWaste: false,
           quantityInStock: variants.length > 0 ? 0 : parsedInitialQuantity,
           weightPerPiece:
             unit === "PIECE" && variants.length === 0
@@ -233,7 +256,7 @@ export async function createFinishedProduct(formData: FormData) {
               companyId,
               finishedProductId: product.id,
               name: variant.name,
-              weightInGrams: variant.weightInGrams,
+              weightPerPiece: variant.weightPerPiece,
               quantityInStock: initialQuantity,
             },
           });
@@ -320,7 +343,7 @@ export async function dispatchFinishedProduct(formData: FormData) {
   }
 
   const product = await prisma.finishedProduct.findFirst({
-    where: { id: productId, companyId, isDeleted: false },
+    where: { id: productId, companyId, isDeleted: false, isWaste: false },
     include: {
       variants: {
         where: { isDeleted: false },
@@ -445,7 +468,7 @@ export async function dispatchFinishedProduct(formData: FormData) {
   redirect("/finished-products");
 }
 
-export type DispatchFinishedGoodsBatchInput = {
+type DispatchFinishedGoodsBatchInput = {
   dispatchDate: string;
   notes?: string;
   items: Array<{
@@ -512,7 +535,7 @@ export async function dispatchFinishedGoodsBatch(
           id: variantId,
           companyId,
           isDeleted: false,
-          finishedProduct: { isDeleted: false },
+          finishedProduct: { isDeleted: false, isWaste: false },
         },
         select: { finishedProductId: true },
       });
@@ -531,7 +554,7 @@ export async function dispatchFinishedGoodsBatch(
 
   for (const row of parsed) {
     const product = await prisma.finishedProduct.findFirst({
-      where: { id: row.productId, companyId, isDeleted: false },
+      where: { id: row.productId, companyId, isDeleted: false, isWaste: false },
       include: {
         variants: { where: { isDeleted: false }, select: { id: true, quantityInStock: true } },
       },
@@ -575,7 +598,7 @@ export async function dispatchFinishedGoodsBatch(
     await prisma.$transaction(async (tx) => {
       for (const row of parsed) {
         const product = await tx.finishedProduct.findFirst({
-          where: { id: row.productId, companyId, isDeleted: false },
+          where: { id: row.productId, companyId, isDeleted: false, isWaste: false },
           include: {
             variants: { where: { isDeleted: false }, select: { id: true, quantityInStock: true } },
           },
@@ -680,18 +703,489 @@ export async function dispatchFinishedGoodsBatch(
   redirect("/finished-products");
 }
 
+type WasteRangeInput = {
+  wasteTypeId: string;
+  fromMonth: number;
+  fromYear: number;
+  toMonth: number;
+  toYear: number;
+};
+
+type WasteReportRow = {
+  dateISO: string;
+  dateLabel: string;
+  opening: number;
+  added: number;
+  dispatched: number;
+  closing: number;
+};
+
+function toISODateKeyLocal(d: Date) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function round2(n: number) {
+  return Math.round(n * 100) / 100;
+}
+
+const IST_OFFSET_MS = 330 * 60 * 1000;
+
+function toISTDateKey(utcDate: Date) {
+  const istDate = new Date(utcDate.getTime() + IST_OFFSET_MS);
+  return istDate.toISOString().slice(0, 10);
+}
+
+function getISTRange(fromMonth: number, fromYear: number, toMonth: number, toYear: number) {
+  const dbStart = new Date(Date.UTC(fromYear, fromMonth - 1, 1) - IST_OFFSET_MS);
+  const dbEnd = new Date(Date.UTC(toYear, toMonth, 1) - IST_OFFSET_MS - 1);
+  const uiStart = new Date(fromYear, fromMonth - 1, 1);
+  const uiEnd = new Date(toYear, toMonth, 0);
+  return { dbStart, dbEnd, uiStart, uiEnd };
+}
+
+function formatDateLabelFromISO(dateISO: string) {
+  const [y, m, d] = dateISO.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d, 12, 0, 0)).toLocaleDateString("en-IN", {
+    day: "2-digit",
+    month: "short",
+  });
+}
+
+export async function getWasteTypes() {
+  const session = await getAuthSession();
+  if (!session?.companyId) throw new Error("Unauthorized");
+  const companyId = session.companyId;
+
+  await ensureDefaultWasteType(companyId);
+
+  const wasteTypes = await prisma.finishedProduct.findMany({
+    where: { companyId, isDeleted: false, isWaste: true },
+    orderBy: { name: "asc" },
+    select: { id: true, name: true, quantityInStock: true },
+  });
+
+  return wasteTypes.map((item) => ({
+    id: item.id,
+    name: item.name,
+    quantityInStock: Number(item.quantityInStock),
+  }));
+}
+
+export async function getWasteTypesWithVariants() {
+  const session = await getAuthSession();
+  if (!session?.companyId) throw new Error("Unauthorized");
+  const companyId = session.companyId;
+
+  await ensureDefaultWasteType(companyId);
+
+  const wasteTypes = await prisma.finishedProduct.findMany({
+    where: { companyId, isDeleted: false, isWaste: true },
+    orderBy: { name: "asc" },
+    select: {
+      id: true,
+      name: true,
+      variants: {
+        where: { isDeleted: false },
+        orderBy: [{ weightPerPiece: "asc" }, { name: "asc" }],
+        select: { id: true, name: true },
+      },
+    },
+  });
+
+  return wasteTypes.map((w) => ({
+    id: w.id,
+    name: w.name,
+    variantCount: w.variants.length,
+    variants: w.variants,
+  }));
+}
+
+export async function createWasteType(name: string): Promise<{ error?: string; success?: true }> {
+  const session = await getAuthSession();
+  if (!session?.companyId) throw new Error("Unauthorized");
+  const companyId = session.companyId;
+
+  const normalizedName = name.trim();
+  if (!normalizedName) {
+    return { error: "Name is required." };
+  }
+
+  const existing = await prisma.finishedProduct.findFirst({
+    where: {
+      companyId,
+      isDeleted: false,
+      isWaste: true,
+      name: { equals: normalizedName, mode: "insensitive" },
+    },
+    select: { id: true },
+  });
+  if (existing) {
+    return { error: "A waste type with this name already exists." };
+  }
+
+  try {
+    await prisma.finishedProduct.create({
+      data: {
+        companyId,
+        name: normalizedName,
+        isWaste: true,
+        unit: "KG",
+      },
+    });
+  } catch {
+    return { error: "Failed to create waste type." };
+  }
+
+  revalidatePath("/finished-products/waste");
+  revalidatePath("/finished-products/waste/manage");
+  return { success: true };
+}
+
+export async function createWasteVariant(input: {
+  wasteTypeId: string;
+  name: string;
+}): Promise<{ error?: string; success?: true }> {
+  const session = await getAuthSession();
+  if (!session?.companyId) throw new Error("Unauthorized");
+  const companyId = session.companyId;
+
+  const wasteTypeId = input.wasteTypeId.trim();
+  const variantName = input.name.trim();
+
+  if (!wasteTypeId) {
+    return { error: "Waste type is required." };
+  }
+  if (!variantName) {
+    return { error: "Variant name is required." };
+  }
+
+  const wasteType = await prisma.finishedProduct.findFirst({
+    where: { id: wasteTypeId, companyId, isDeleted: false, isWaste: true },
+    select: { id: true },
+  });
+  if (!wasteType) {
+    return { error: "Waste type not found." };
+  }
+
+  const duplicate = await prisma.finishedProductVariant.findFirst({
+    where: {
+      companyId,
+      finishedProductId: wasteTypeId,
+      isDeleted: false,
+      name: { equals: variantName, mode: "insensitive" },
+    },
+    select: { id: true },
+  });
+  if (duplicate) {
+    return { error: "A variant with this name already exists for this waste type." };
+  }
+
+  try {
+    await prisma.finishedProductVariant.create({
+      data: {
+        companyId,
+        finishedProductId: wasteTypeId,
+        name: variantName,
+        weightPerPiece: 1,
+        quantityInStock: 0,
+      },
+    });
+  } catch {
+    return { error: "Failed to create waste variant." };
+  }
+
+  revalidatePath("/finished-products/waste/manage");
+  return { success: true };
+}
+
+export async function getWasteReportRange(input: WasteRangeInput): Promise<WasteReportRow[]> {
+  const session = await getAuthSession();
+  if (!session?.companyId) throw new Error("Unauthorized");
+  const companyId = session.companyId;
+
+  await ensureDefaultWasteType(companyId);
+
+  const wasteTypeId = input.wasteTypeId;
+  const fromMonth = Number(input.fromMonth);
+  const fromYear = Number(input.fromYear);
+  const toMonth = Number(input.toMonth);
+  const toYear = Number(input.toYear);
+
+  const { dbStart, dbEnd, uiStart, uiEnd } = getISTRange(
+    fromMonth,
+    fromYear,
+    toMonth,
+    toYear
+  );
+  const now = new Date();
+
+  if (!wasteTypeId) return [];
+  if (dbEnd.getTime() < dbStart.getTime()) return [];
+
+  const wasteType = await prisma.finishedProduct.findFirst({
+    where: { id: wasteTypeId, companyId, isDeleted: false, isWaste: true },
+    select: { quantityInStock: true },
+  });
+  if (!wasteType) return [];
+
+  const currentStock = round2(Number(wasteType.quantityInStock));
+
+  const [addedInRange, dispatchedInRange, addedAfter, dispatchedAfter] = await Promise.all([
+    prisma.finishedProductLedger.findMany({
+      where: {
+        companyId,
+        finishedProductId: wasteTypeId,
+        eventType: "RECEIPT",
+        date: { gte: dbStart, lte: dbEnd },
+      },
+      select: { date: true, quantityProduced: true },
+    }),
+    prisma.finishedProductLedger.findMany({
+      where: {
+        companyId,
+        finishedProductId: wasteTypeId,
+        eventType: "DISPATCH",
+        date: { gte: dbStart, lte: dbEnd },
+      },
+      select: { date: true, quantityDispatched: true },
+    }),
+    prisma.finishedProductLedger.findMany({
+      where: {
+        companyId,
+        finishedProductId: wasteTypeId,
+        eventType: "RECEIPT",
+        date: { gt: dbEnd, lte: now },
+      },
+      select: { quantityProduced: true },
+    }),
+    prisma.finishedProductLedger.findMany({
+      where: {
+        companyId,
+        finishedProductId: wasteTypeId,
+        eventType: "DISPATCH",
+        date: { gt: dbEnd, lte: now },
+      },
+      select: { quantityDispatched: true },
+    }),
+  ]);
+
+  const dailyAdded: Record<string, number> = {};
+  const dailyDispatch: Record<string, number> = {};
+
+  for (const p of addedInRange) {
+    const key = toISTDateKey(p.date);
+    dailyAdded[key] = round2((dailyAdded[key] ?? 0) + Number(p.quantityProduced));
+  }
+  for (const d of dispatchedInRange) {
+    const key = toISTDateKey(d.date);
+    dailyDispatch[key] = round2(
+      (dailyDispatch[key] ?? 0) + Number(d.quantityDispatched)
+    );
+  }
+
+  const addedInRangeTotal = round2(
+    addedInRange.reduce((sum, p) => sum + Number(p.quantityProduced), 0)
+  );
+  const dispatchedInRangeTotal = round2(
+    dispatchedInRange.reduce((sum, p) => sum + Number(p.quantityDispatched), 0)
+  );
+  const addedAfterTotal = round2(
+    addedAfter.reduce((sum, p) => sum + Number(p.quantityProduced), 0)
+  );
+  const dispatchedAfterTotal = round2(
+    dispatchedAfter.reduce((sum, p) => sum + Number(p.quantityDispatched), 0)
+  );
+
+  const stockAtEnd = round2(currentStock - addedAfterTotal + dispatchedAfterTotal);
+  let opening = round2(stockAtEnd - addedInRangeTotal + dispatchedInRangeTotal);
+
+  const rows: WasteReportRow[] = [];
+  for (
+    let d = new Date(uiStart);
+    d <= uiEnd;
+    d = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1)
+  ) {
+    const dateKey = toISODateKeyLocal(d);
+    const added = dailyAdded[dateKey] ?? 0;
+    const dispatched = dailyDispatch[dateKey] ?? 0;
+    const closing = round2(opening + added - dispatched);
+
+    rows.push({
+      dateISO: dateKey,
+      dateLabel: formatDateLabelFromISO(dateKey),
+      opening,
+      added,
+      dispatched,
+      closing,
+    });
+
+    opening = closing;
+  }
+
+  return rows;
+}
+
+type WasteEntryInput = {
+  date: string;
+  wasteTypeId: string;
+  quantity: number;
+  notes?: string;
+};
+
+export async function createWasteEntry(input: WasteEntryInput) {
+  const session = await getAuthSession();
+  if (!session?.companyId) throw new Error("Unauthorized");
+  const companyId = session.companyId;
+
+  await ensureDefaultWasteType(companyId);
+
+  const date = new Date(input.date);
+  if (!input.wasteTypeId) return { error: "Please select a waste type." };
+  if (!input.date || Number.isNaN(date.getTime())) return { error: "Date is required." };
+  if (date.getTime() > Date.now()) return { error: "Date cannot be in the future." };
+  if (!Number.isFinite(input.quantity) || input.quantity <= 0) {
+    return { error: "Quantity must be greater than 0." };
+  }
+
+  const notes = input.notes?.trim() || "Waste added";
+
+  try {
+    await prisma.$transaction(async (tx) => {
+      const wasteType = await tx.finishedProduct.findFirst({
+        where: { id: input.wasteTypeId, companyId, isWaste: true, isDeleted: false },
+      });
+      if (!wasteType) {
+        throw Object.assign(new Error("Not found"), { code: "WASTE_NOT_FOUND" });
+      }
+
+      const opening = Number(wasteType.quantityInStock);
+      const closing = opening + input.quantity;
+
+      await tx.finishedProduct.update({
+        where: { id: input.wasteTypeId },
+        data: {
+          quantityInStock: closing,
+        },
+      });
+
+      await tx.finishedProductLedger.create({
+        data: {
+          companyId,
+          finishedProductId: input.wasteTypeId,
+          date,
+          eventType: "RECEIPT",
+          openingBalance: opening,
+          quantityProduced: input.quantity,
+          quantityDispatched: 0,
+          closingBalance: closing,
+          notes,
+        },
+      });
+    });
+  } catch {
+    return { error: "Failed to add waste entry." };
+  }
+
+  revalidatePath("/finished-products/waste");
+  revalidatePath("/finished-products");
+  return { success: true };
+}
+
+type DispatchWasteInput = {
+  date: string;
+  wasteTypeId: string;
+  quantity: number;
+  notes?: string;
+};
+
+export async function dispatchWaste(input: DispatchWasteInput) {
+  const session = await getAuthSession();
+  if (!session?.companyId) throw new Error("Unauthorized");
+  const companyId = session.companyId;
+
+  await ensureDefaultWasteType(companyId);
+
+  const date = new Date(input.date);
+  if (!input.wasteTypeId) return { error: "Please select a waste type." };
+  if (!input.date || Number.isNaN(date.getTime())) return { error: "Date is required." };
+  if (date.getTime() > Date.now()) return { error: "Date cannot be in the future." };
+  if (!Number.isFinite(input.quantity) || input.quantity <= 0) {
+    return { error: "Quantity must be greater than 0." };
+  }
+
+  const notes = input.notes?.trim() || "Waste dispatched";
+
+  try {
+    await prisma.$transaction(async (tx) => {
+      const wasteType = await tx.finishedProduct.findFirst({
+        where: { id: input.wasteTypeId, companyId, isWaste: true, isDeleted: false },
+      });
+      if (!wasteType) {
+        throw Object.assign(new Error("Not found"), { code: "WASTE_NOT_FOUND" });
+      }
+
+      const opening = Number(wasteType.quantityInStock);
+      if (input.quantity > opening) {
+        throw Object.assign(new Error("Insufficient stock"), { code: "INSUFFICIENT_STOCK" });
+      }
+
+      const closing = opening - input.quantity;
+
+      await tx.finishedProduct.update({
+        where: { id: input.wasteTypeId },
+        data: {
+          quantityInStock: closing,
+          lastDispatchedAt: date,
+          lastDispatchedQuantity: input.quantity,
+        },
+      });
+
+      await tx.finishedProductLedger.create({
+        data: {
+          companyId,
+          finishedProductId: input.wasteTypeId,
+          date,
+          eventType: "DISPATCH",
+          openingBalance: opening,
+          quantityProduced: 0,
+          quantityDispatched: input.quantity,
+          closingBalance: closing,
+          notes,
+        },
+      });
+    });
+  } catch (error: unknown) {
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      (error as { code: string }).code === "INSUFFICIENT_STOCK"
+    ) {
+      return { error: "Dispatch quantity cannot exceed available stock." };
+    }
+    return { error: "Failed to dispatch waste." };
+  }
+
+  revalidatePath("/finished-products/waste");
+  revalidatePath("/finished-products");
+  return { success: true };
+}
+
 export async function getAllFinishedProducts() {
   const session = await getAuthSession();
   if (!session?.companyId) throw new Error("Unauthorized");
   const companyId = session.companyId;
 
   const products = await prisma.finishedProduct.findMany({
-    where: { companyId, isDeleted: false },
+    where: { companyId, isDeleted: false, isWaste: false },
     include: {
       variants: {
         where: { isDeleted: false },
-        select: { id: true, name: true, weightInGrams: true, quantityInStock: true },
-        orderBy: [{ weightInGrams: "asc" }, { name: "asc" }],
+        select: { id: true, name: true, weightPerPiece: true, quantityInStock: true },
+        orderBy: [{ weightPerPiece: "asc" }, { name: "asc" }],
       },
       ledgerEntries: {
         where: {
@@ -713,7 +1207,7 @@ export async function getAllFinishedProducts() {
     const variants = p.variants.map((v) => ({
       id: v.id,
       name: v.name,
-      weightInGrams: Number(v.weightInGrams),
+      weightPerPiece: Number(v.weightPerPiece),
       quantityInStock: Number(v.quantityInStock),
     }));
     const quantityInStock = Number(p.quantityInStock);
@@ -748,11 +1242,11 @@ export async function getFinishedProductById(id: string) {
   const companyId = session.companyId;
 
   const product = await prisma.finishedProduct.findFirst({
-    where: { id, companyId, isDeleted: false },
+    where: { id, companyId, isDeleted: false, isWaste: false },
     include: {
       variants: {
         where: { isDeleted: false },
-        select: { id: true, name: true, weightInGrams: true, quantityInStock: true },
+        select: { id: true, name: true, weightPerPiece: true, quantityInStock: true },
         orderBy: { createdAt: "asc" },
       },
     },
@@ -770,7 +1264,7 @@ export async function getFinishedProductById(id: string) {
     variants: product.variants.map((variant) => ({
       id: variant.id,
       name: variant.name,
-      weightInGrams: Number(variant.weightInGrams),
+      weightPerPiece: Number(variant.weightPerPiece),
       quantityInStock: Number(variant.quantityInStock),
     })),
   };
@@ -797,6 +1291,7 @@ export async function updateFinishedProduct(id: string, formData: FormData) {
       id: { not: id },
       name: { equals: name, mode: "insensitive" },
       isDeleted: false,
+      isWaste: false,
     },
     select: { id: true },
   });
@@ -805,7 +1300,7 @@ export async function updateFinishedProduct(id: string, formData: FormData) {
   }
 
   const productMeta = await prisma.finishedProduct.findFirst({
-    where: { id, companyId, isDeleted: false },
+    where: { id, companyId, isDeleted: false, isWaste: false },
     select: { unit: true },
   });
   if (!productMeta) {
@@ -824,8 +1319,8 @@ export async function updateFinishedProduct(id: string, formData: FormData) {
     if (!variant.name) {
       return { error: "Variant name is required for all variant rows." };
     }
-    if (!Number.isFinite(variant.weightInGrams) || variant.weightInGrams <= 0) {
-      return { error: "Variant weight must be greater than 0 grams." };
+    if (!Number.isFinite(variant.weightPerPiece) || variant.weightPerPiece <= 0) {
+      return { error: "Weight must be greater than 0." };
     }
     if (!variant.id && !isMigrationScenarioPreview) {
       const iq = variant.initialQuantity ?? Number.NaN;
@@ -897,7 +1392,7 @@ export async function updateFinishedProduct(id: string, formData: FormData) {
           return {
             id: variant.id,
             name: variant.name,
-            weightInGrams: variant.weightInGrams,
+            weightPerPiece: variant.weightPerPiece,
             allocatedQuantity: allocated,
           };
         });
@@ -919,7 +1414,7 @@ export async function updateFinishedProduct(id: string, formData: FormData) {
               where: { id: variantId, companyId },
               data: {
                 name: target.name,
-                weightInGrams: target.weightInGrams,
+                weightPerPiece: target.weightPerPiece,
                 quantityInStock: target.allocatedQuantity,
               },
             });
@@ -929,7 +1424,7 @@ export async function updateFinishedProduct(id: string, formData: FormData) {
                 companyId,
                 finishedProductId: id,
                 name: target.name,
-                weightInGrams: target.weightInGrams,
+                weightPerPiece: target.weightPerPiece,
                 quantityInStock: target.allocatedQuantity,
               },
             });
@@ -982,7 +1477,7 @@ export async function updateFinishedProduct(id: string, formData: FormData) {
             where: { id: variant.id, companyId },
             data: {
               name: variant.name,
-              weightInGrams: variant.weightInGrams,
+              weightPerPiece: variant.weightPerPiece,
             },
           });
           continue;
@@ -998,7 +1493,7 @@ export async function updateFinishedProduct(id: string, formData: FormData) {
             companyId,
             finishedProductId: id,
             name: variant.name,
-            weightInGrams: variant.weightInGrams,
+            weightPerPiece: variant.weightPerPiece,
             quantityInStock: initialQty,
           },
         });
@@ -1067,6 +1562,12 @@ export async function getFinishedProductLedger(id: string, variantId?: string) {
   if (!session?.companyId) throw new Error("Unauthorized");
   const companyId = session.companyId;
 
+  const product = await prisma.finishedProduct.findFirst({
+    where: { id, companyId, isDeleted: false },
+    select: { id: true },
+  });
+  if (!product) return [];
+
   const entries = await prisma.finishedProductLedger.findMany({
     where: {
       companyId,
@@ -1100,12 +1601,17 @@ export async function getFinishedProductVariants(productId: string) {
   const companyId = session.companyId;
 
   const variants = await prisma.finishedProductVariant.findMany({
-    where: { companyId, finishedProductId: productId, isDeleted: false },
+    where: {
+      companyId,
+      finishedProductId: productId,
+      isDeleted: false,
+      finishedProduct: { isWaste: false, isDeleted: false },
+    },
     orderBy: { createdAt: "asc" },
     select: {
       id: true,
       name: true,
-      weightInGrams: true,
+      weightPerPiece: true,
       quantityInStock: true,
     },
   });
@@ -1113,7 +1619,7 @@ export async function getFinishedProductVariants(productId: string) {
   return variants.map((variant) => ({
     id: variant.id,
     name: variant.name,
-    weightInGrams: Number(variant.weightInGrams),
+    weightPerPiece: Number(variant.weightPerPiece),
     quantityInStock: Number(variant.quantityInStock),
   }));
 }
@@ -1174,7 +1680,7 @@ export async function deleteFinishedProduct(productId: string) {
       });
 
       const updatedProduct = await tx.finishedProduct.updateMany({
-        where: { id: productId, companyId },
+        where: { id: productId, companyId, isWaste: false },
         data: {
           isDeleted: true,
           deletedAt,
@@ -1265,7 +1771,7 @@ export async function debugFinishedProductVisibility(productId: string) {
 
   const product = await prisma.finishedProduct.findFirst({
     where: { id: productId, companyId },
-    select: { id: true, isDeleted: true },
+    select: { id: true, isDeleted: true, isWaste: true },
   });
   const [variantsTotal, variantsNotDeleted] = await Promise.all([
     prisma.finishedProductVariant.count({
@@ -1279,6 +1785,7 @@ export async function debugFinishedProductVisibility(productId: string) {
   return {
     productExists: Boolean(product),
     isDeleted: product ? product.isDeleted : null,
+    isWaste: product ? product.isWaste : null,
     variantsTotal,
     variantsNotDeleted,
   };

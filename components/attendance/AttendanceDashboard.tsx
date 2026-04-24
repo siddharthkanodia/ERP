@@ -424,7 +424,7 @@ export function AttendanceDashboard({
     const records = [...pendingChanges.values()];
     startSaveAllTransition(async () => {
       const res = await upsertBulkAttendance(records);
-      if (!res?.error) {
+      if (res?.success) {
         const count = records.length;
         setPendingChanges(new Map());
         setInlineMessage(`${count} attendance records saved.`);

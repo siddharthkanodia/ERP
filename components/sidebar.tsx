@@ -1,54 +1,12 @@
-"use client";
+import { Factory } from "lucide-react";
 
-import Link from "next/link";
-import { usePathname } from "next/navigation";
-import {
-  Database,
-  Factory,
-  PackageCheck,
-  Users,
-  ClipboardList,
-  BarChart3,
-  LogOut,
-} from "lucide-react";
+import { getAuthSession } from "@/lib/auth";
+import { SidebarNav } from "@/components/sidebar-nav";
+import { UserMenu } from "@/components/user-menu";
 
-import { cn } from "@/lib/utils";
-
-const navItems = [
-  {
-    label: "Raw Materials",
-    href: "/raw-materials",
-    Icon: Database,
-  },
-  {
-    label: "Finished Products",
-    href: "/finished-products",
-    Icon: PackageCheck,
-  },
-  {
-    label: "Production",
-    href: "/production",
-    Icon: Factory,
-  },
-  {
-    label: "Employees",
-    href: "/employees",
-    Icon: Users,
-  },
-  {
-    label: "Attendance",
-    href: "/attendance",
-    Icon: ClipboardList,
-  },
-  {
-    label: "Reports",
-    href: "/reports",
-    Icon: BarChart3,
-  },
-];
-
-export function Sidebar() {
-  const pathname = usePathname();
+export async function Sidebar() {
+  const session = await getAuthSession();
+  const email = session?.email ?? "";
 
   return (
     <aside className="hidden h-screen w-60 shrink-0 border-r bg-zinc-50 md:block">
@@ -60,44 +18,12 @@ export function Sidebar() {
           </div>
         </div>
 
-        <nav className="flex-1 space-y-1 px-2 py-2">
-          {navItems.map(({ label, href, Icon }) => {
-            const isActive =
-              pathname === href || pathname.startsWith(`${href}/`);
-
-            return (
-              <Link
-                key={href}
-                href={href}
-                className={cn(
-                  "flex items-center gap-2 rounded-md border border-transparent px-2 py-2 text-sm text-zinc-700 transition-colors",
-                  "hover:bg-white hover:text-foreground",
-                  isActive && "border-border bg-white text-foreground"
-                )}
-              >
-                <Icon className="size-4" />
-                <span>{label}</span>
-              </Link>
-            );
-          })}
-        </nav>
+        <SidebarNav />
 
         <div className="border-t px-2 py-2">
-          <form action="/auth/logout" method="POST">
-            <button
-              type="submit"
-              className={cn(
-                "flex w-full items-center gap-2 rounded-md border border-transparent px-2 py-2 text-sm text-zinc-700 transition-colors",
-                "hover:bg-white hover:text-foreground"
-              )}
-            >
-              <LogOut className="size-4" />
-              <span>Logout</span>
-            </button>
-          </form>
+          <UserMenu email={email} />
         </div>
       </div>
     </aside>
   );
 }
-

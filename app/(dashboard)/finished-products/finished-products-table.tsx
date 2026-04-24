@@ -18,7 +18,7 @@ type ProductRow = {
   variants: Array<{
     id: string;
     name: string;
-    weightInGrams: number;
+    weightPerPiece: number;
     quantityInStock: number;
   }>;
 };
@@ -111,7 +111,7 @@ export function FinishedProductsTable({
                     {product.unit === "PIECE" &&
                     product.variants.length === 0 &&
                     product.weightPerPiece != null
-                      ? `${product.weightPerPiece.toFixed(2)} g / piece`
+                      ? `${product.weightPerPiece.toFixed(3)} kg / piece`
                       : "-"}
                   </td>
                   <td className="px-3 py-2 text-muted-foreground">
@@ -154,7 +154,7 @@ export function FinishedProductsTable({
                                   Variant Name
                                 </th>
                                 <th className="px-3 py-2 text-right font-medium text-foreground">
-                                  Weight (grams)
+                                  Weight (kg)
                                 </th>
                                 <th className="px-3 py-2 text-right font-medium text-foreground">
                                   Stock
@@ -172,7 +172,7 @@ export function FinishedProductsTable({
                                 >
                                   <td className="px-3 py-2">{variant.name}</td>
                                   <td className="px-3 py-2 text-right tabular-nums">
-                                    {variant.weightInGrams}
+                                    {variant.weightPerPiece}
                                   </td>
                                   <td className="px-3 py-2 text-right tabular-nums">
                                     {variant.quantityInStock}{" "}

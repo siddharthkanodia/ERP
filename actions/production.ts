@@ -1,20 +1,17 @@
 "use server";
 
-import type { Prisma, PrismaClient } from "@prisma/client";
-import type { ITXClientDenyList } from "@prisma/client/runtime/library";
 import { getAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { calculateKgWeight } from "@/lib/production-utils";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
-type RawMaterialInput = {
+type RawMaterialTypeInput = {
   rawMaterialId: string;
-  quantityIssued: number;
 };
 
 type UpdateWorkOrderRawMaterialInput = {
-  id: string;
-  quantityIssued: number;
+  rawMaterialId: string;
 };
 
 function parseNumber(value: FormDataEntryValue | null): number {
@@ -32,110 +29,152 @@ function parseJsonArray<T>(value: FormDataEntryValue | null): T[] | null {
   }
 }
 
-async function refreshWorkOrderStatus(
+function round2(value: number) {
+  return Math.round(value * 100) / 100;
+}
+
+function computeConsumptionKg(input: {
+  unit: "KG" | "PIECE";
+  totalProduced: number;
+  weightPerPieceKg: number | null;
+}) {
+  if (input.unit === "PIECE" && !Number.isFinite(input.weightPerPieceKg ?? Number.NaN)) {
+    throw Object.assign(new Error("Weight per piece missing"), {
+      code: "WEIGHT_PER_PIECE_REQUIRED",
+    });
+  }
+  return round2(
+    calculateKgWeight(input.totalProduced, input.unit, input.weightPerPieceKg ?? 0)
+  );
+}
+
+async function readWorkOrderCompletionState(
   workOrderId: string,
-  companyId: string,
-  tx: Prisma.TransactionClient
+  companyId: string
 ) {
-  const workOrder = await tx.workOrder.findFirst({
+  const wo = await prisma.workOrder.findFirst({
     where: { id: workOrderId, companyId },
     select: {
+      status: true,
       plannedQuantity: true,
-      completedAt: true,
       productionEntries: { select: { quantityProduced: true } },
     },
   });
-
-  if (!workOrder) return;
-
-  const totalProduced = workOrder.productionEntries.reduce(
-    (sum, entry) => sum + Number(entry.quantityProduced),
-    0
+  if (!wo) return null;
+  const updatedTotalProduced = round2(
+    wo.productionEntries.reduce(
+      (sum, entry) => sum + Number(entry.quantityProduced),
+      0
+    )
   );
-  const plannedQuantity = Number(workOrder.plannedQuantity);
+  return {
+    status: wo.status,
+    plannedQuantity: Number(wo.plannedQuantity),
+    updatedTotalProduced,
+  };
+}
 
-  if (totalProduced >= plannedQuantity) {
-    await tx.workOrder.update({
-      where: { id: workOrderId, companyId },
-      data: {
-        status: "COMPLETED",
-        completedAt: workOrder.completedAt ?? new Date(),
+async function validateProductForWorkOrder(input: {
+  companyId: string;
+  finishedProductId: string;
+  finishedProductVariantId: string | null;
+  plannedQuantity: number;
+}) {
+  const finishedProduct = await prisma.finishedProduct.findFirst({
+    where: {
+      id: input.finishedProductId,
+      companyId: input.companyId,
+      isDeleted: false,
+      isWaste: false,
+    },
+    select: {
+      id: true,
+      unit: true,
+      weightPerPiece: true,
+      variants: {
+        where: { isDeleted: false },
+        select: { id: true, weightPerPiece: true },
       },
-    });
-  } else {
-    await tx.workOrder.update({
-      where: { id: workOrderId, companyId },
-      data: {
-        status: "OPEN",
-        completedAt: null,
-      },
+    },
+  });
+
+  if (!finishedProduct) {
+    throw Object.assign(new Error("Not found"), {
+      code: "FINISHED_PRODUCT_NOT_FOUND",
     });
   }
+
+  const hasVariants = finishedProduct.variants.length > 0;
+  if (hasVariants && !input.finishedProductVariantId) {
+    throw Object.assign(new Error("Variant required"), {
+      code: "VARIANT_REQUIRED",
+    });
+  }
+  if (!hasVariants && input.finishedProductVariantId) {
+    throw Object.assign(new Error("Variant not allowed"), {
+      code: "VARIANT_NOT_ALLOWED",
+    });
+  }
+
+  const selectedVariant = input.finishedProductVariantId
+    ? finishedProduct.variants.find((v) => v.id === input.finishedProductVariantId)
+    : null;
+
+  if (input.finishedProductVariantId && !selectedVariant) {
+    throw Object.assign(new Error("Variant invalid"), {
+      code: "VARIANT_INVALID",
+    });
+  }
+
+  if (
+    finishedProduct.unit === "PIECE" &&
+    !Number.isInteger(input.plannedQuantity)
+  ) {
+    throw Object.assign(new Error("Invalid quantity"), {
+      code: "PLANNED_INTEGER_REQUIRED",
+    });
+  }
+
+  const weightPerPieceKg = selectedVariant
+    ? Number(selectedVariant.weightPerPiece)
+    : finishedProduct.weightPerPiece != null
+      ? Number(finishedProduct.weightPerPiece)
+      : null;
+
+  if (finishedProduct.unit === "PIECE" && !Number.isFinite(weightPerPieceKg ?? Number.NaN)) {
+    throw Object.assign(new Error("Weight required"), {
+      code: "WEIGHT_PER_PIECE_REQUIRED",
+    });
+  }
+
+  return {
+    id: finishedProduct.id,
+    unit: finishedProduct.unit,
+    weightPerPieceKg,
+  };
 }
 
-async function rebuildRawMaterialLedgerBalances(
-  rawMaterialId: string,
-  companyId: string,
-  tx: Omit<PrismaClient, ITXClientDenyList>
-) {
-  const ledgers = await tx.rawMaterialLedger.findMany({
-    where: { rawMaterialId, companyId },
-    orderBy: [{ date: "asc" }, { id: "asc" }],
-  });
-
-  let runningBalance = 0;
-  const updates = ledgers.map((ledger) => {
-    const quantityIn = Number(ledger.quantityIn);
-    const quantityOut = Number(ledger.quantityOut);
-    const openingBalance = runningBalance;
-    const closingBalance = openingBalance + quantityIn - quantityOut;
-    runningBalance = closingBalance;
-
-    return tx.rawMaterialLedger.update({
-      where: { id: ledger.id },
-      data: {
-        openingBalance,
-        closingBalance,
-      },
+function validateRawMaterialTypes(rawMaterialsInput: RawMaterialTypeInput[]) {
+  if (!rawMaterialsInput || rawMaterialsInput.length === 0) {
+    throw Object.assign(new Error("At least one raw material is required."), {
+      code: "RAW_MATERIALS_REQUIRED",
     });
-  });
+  }
 
-  await Promise.all(updates);
-}
-
-async function rebuildFinishedProductLedgerBalances(
-  finishedProductId: string,
-  finishedProductVariantId: string | null,
-  companyId: string,
-  tx: Omit<PrismaClient, ITXClientDenyList>
-) {
-  const ledgers = await tx.finishedProductLedger.findMany({
-    where: {
-      companyId,
-      finishedProductId,
-      finishedProductVariantId: finishedProductVariantId ?? null,
-    },
-    orderBy: [{ date: "asc" }, { id: "asc" }],
-  });
-
-  let runningBalance = 0;
-  const updates = ledgers.map((ledger) => {
-    const quantityProduced = Number(ledger.quantityProduced);
-    const quantityDispatched = Number(ledger.quantityDispatched);
-    const openingBalance = runningBalance;
-    const closingBalance = openingBalance + quantityProduced - quantityDispatched;
-    runningBalance = closingBalance;
-
-    return tx.finishedProductLedger.update({
-      where: { id: ledger.id },
-      data: {
-        openingBalance,
-        closingBalance,
-      },
+  const ids = rawMaterialsInput.map((rm) => rm.rawMaterialId?.trim()).filter(Boolean) as string[];
+  if (ids.length !== rawMaterialsInput.length) {
+    throw Object.assign(new Error("Raw material is required in all rows."), {
+      code: "RAW_MATERIAL_REQUIRED",
     });
-  });
+  }
 
-  await Promise.all(updates);
+  if (new Set(ids).size !== ids.length) {
+    throw Object.assign(new Error("Duplicate raw materials are not allowed."), {
+      code: "RAW_MATERIAL_DUPLICATE",
+    });
+  }
+
+  return ids;
 }
 
 export async function getAllWorkOrders() {
@@ -148,10 +187,10 @@ export async function getAllWorkOrders() {
     orderBy: { createdAt: "desc" },
     include: {
       finishedProduct: {
-        select: { id: true, name: true, unit: true },
+        select: { id: true, name: true, unit: true, weightPerPiece: true },
       },
       finishedProductVariant: {
-        select: { id: true, name: true, weightInGrams: true },
+        select: { id: true, name: true, weightPerPiece: true },
       },
       rawMaterials: {
         include: {
@@ -159,7 +198,7 @@ export async function getAllWorkOrders() {
         },
       },
       productionEntries: {
-        select: { id: true, quantityProduced: true },
+        select: { id: true, quantityProduced: true, entryDate: true },
       },
     },
   });
@@ -169,6 +208,21 @@ export async function getAllWorkOrders() {
       (sum, entry) => sum + Number(entry.quantityProduced),
       0
     );
+    const variance = round2(totalProduced - Number(wo.plannedQuantity));
+
+    const weightPerPieceKg = wo.finishedProductVariant
+      ? Number(wo.finishedProductVariant.weightPerPiece)
+      : wo.finishedProduct?.weightPerPiece != null
+        ? Number(wo.finishedProduct.weightPerPiece)
+        : null;
+
+    const totalConsumptionKg = wo.finishedProduct
+      ? computeConsumptionKg({
+          unit: wo.finishedProduct.unit,
+          totalProduced,
+          weightPerPieceKg,
+        })
+      : 0;
 
     return {
       id: wo.id,
@@ -191,16 +245,17 @@ export async function getAllWorkOrders() {
         ? {
             id: wo.finishedProductVariant.id,
             name: wo.finishedProductVariant.name,
-            weightInGrams: Number(wo.finishedProductVariant.weightInGrams),
+            weightPerPiece: Number(wo.finishedProductVariant.weightPerPiece),
           }
         : null,
       rawMaterials: wo.rawMaterials.map((rm) => ({
         id: rm.id,
         rawMaterialId: rm.rawMaterialId,
         name: rm.rawMaterial.name,
-        quantityIssued: Number(rm.quantityIssued),
       })),
       totalProduced,
+      variance,
+      totalConsumptionKg,
     };
   });
 }
@@ -214,10 +269,10 @@ export async function getWorkOrderById(id: string) {
     where: { id, companyId },
     include: {
       finishedProduct: {
-        select: { id: true, name: true, unit: true },
+        select: { id: true, name: true, unit: true, weightPerPiece: true },
       },
       finishedProductVariant: {
-        select: { id: true, name: true, weightInGrams: true },
+        select: { id: true, name: true, weightPerPiece: true },
       },
       rawMaterials: {
         include: {
@@ -229,9 +284,9 @@ export async function getWorkOrderById(id: string) {
           id: true,
           entryDate: true,
           quantityProduced: true,
-          wasteGenerated: true,
           createdAt: true,
         },
+        orderBy: [{ entryDate: "desc" }, { createdAt: "desc" }],
       },
     },
   });
@@ -242,11 +297,27 @@ export async function getWorkOrderById(id: string) {
     (sum, entry) => sum + Number(entry.quantityProduced),
     0
   );
+  const plannedQuantity = Number(workOrder.plannedQuantity);
+  const variance = round2(totalProduced - plannedQuantity);
+
+  const weightPerPieceKg = workOrder.finishedProductVariant
+    ? Number(workOrder.finishedProductVariant.weightPerPiece)
+    : workOrder.finishedProduct?.weightPerPiece != null
+      ? Number(workOrder.finishedProduct.weightPerPiece)
+      : null;
+
+  const totalConsumptionKg = workOrder.finishedProduct
+    ? computeConsumptionKg({
+        unit: workOrder.finishedProduct.unit,
+        totalProduced,
+        weightPerPieceKg,
+      })
+    : 0;
 
   return {
     id: workOrder.id,
     workOrderName: workOrder.workOrderName,
-    plannedQuantity: Number(workOrder.plannedQuantity),
+    plannedQuantity,
     status: workOrder.status,
     createdAt: workOrder.createdAt,
     completedAt: workOrder.completedAt,
@@ -264,23 +335,23 @@ export async function getWorkOrderById(id: string) {
       ? {
           id: workOrder.finishedProductVariant.id,
           name: workOrder.finishedProductVariant.name,
-          weightInGrams: Number(workOrder.finishedProductVariant.weightInGrams),
+          weightPerPiece: Number(workOrder.finishedProductVariant.weightPerPiece),
         }
       : null,
     rawMaterials: workOrder.rawMaterials.map((rm) => ({
       id: rm.id,
       rawMaterialId: rm.rawMaterialId,
       name: rm.rawMaterial.name,
-      quantityIssued: Number(rm.quantityIssued),
     })),
     productionEntries: workOrder.productionEntries.map((entry) => ({
       id: entry.id,
       entryDate: entry.entryDate,
       quantityProduced: Number(entry.quantityProduced),
-      wasteGenerated: Number(entry.wasteGenerated),
       createdAt: entry.createdAt,
     })),
     totalProduced,
+    variance,
+    totalConsumptionKg,
   };
 }
 
@@ -294,7 +365,7 @@ export async function createWorkOrder(formData: FormData) {
   const finishedProductVariantId =
     (formData.get("finishedProductVariantId") as string | null)?.trim() || null;
   const plannedQuantity = parseNumber(formData.get("plannedQuantity"));
-  const rawMaterialsInput = parseJsonArray<RawMaterialInput>(
+  const rawMaterialsInput = parseJsonArray<RawMaterialTypeInput>(
     formData.get("rawMaterials")
   );
 
@@ -306,193 +377,69 @@ export async function createWorkOrder(formData: FormData) {
   if (!Number.isFinite(plannedQuantity) || plannedQuantity <= 0) {
     return { error: "Planned quantity must be greater than 0." };
   }
-  if (!rawMaterialsInput || rawMaterialsInput.length === 0) {
-    return { error: "At least one raw material is required." };
-  }
-
-  for (const item of rawMaterialsInput) {
-    if (!item.rawMaterialId) return { error: "Raw material is required." };
-    if (!Number.isFinite(item.quantityIssued) || item.quantityIssued <= 0) {
-      return { error: "Issued quantity must be greater than 0." };
-    }
+  if (!rawMaterialsInput) {
+    return { error: "At least one raw material type is required." };
   }
 
   try {
-    await prisma.$transaction(async (tx) => {
-      const finishedProduct = await tx.finishedProduct.findFirst({
-        where: { id: finishedProductId, companyId },
-        select: { unit: true, variants: { select: { id: true } } },
-      });
-      if (!finishedProduct) {
-        throw Object.assign(new Error("Not found"), {
-          code: "FINISHED_PRODUCT_NOT_FOUND",
-        });
-      }
+    const rawMaterialIds = validateRawMaterialTypes(rawMaterialsInput);
+    const product = await validateProductForWorkOrder({
+      companyId,
+      finishedProductId,
+      finishedProductVariantId,
+      plannedQuantity,
+    });
 
-      const hasVariants = finishedProduct.variants.length > 0;
-      if (hasVariants && !finishedProductVariantId) {
-        throw Object.assign(new Error("Variant required"), {
-          code: "VARIANT_REQUIRED",
-        });
-      }
-      if (!hasVariants && finishedProductVariantId) {
-        throw Object.assign(new Error("Variant not allowed"), {
-          code: "VARIANT_NOT_ALLOWED",
-        });
-      }
-      if (
-        hasVariants &&
-        !finishedProduct.variants.some((v) => v.id === finishedProductVariantId)
-      ) {
-        throw Object.assign(new Error("Variant invalid"), {
-          code: "VARIANT_INVALID",
-        });
-      }
+    const rawMaterials = await prisma.rawMaterial.findMany({
+      where: { id: { in: rawMaterialIds }, companyId },
+      select: { id: true },
+    });
+    if (rawMaterials.length !== rawMaterialIds.length) {
+      return { error: "One or more raw materials are invalid." };
+    }
 
-      if (
-        finishedProduct.unit === "PIECE" &&
-        !Number.isInteger(plannedQuantity)
-      ) {
-        throw Object.assign(new Error("Invalid quantity"), {
-          code: "PLANNED_INTEGER_REQUIRED",
-        });
-      }
-
-      const materialIds = rawMaterialsInput.map((rm) => rm.rawMaterialId);
-      const materials = await tx.rawMaterial.findMany({
-        where: { id: { in: materialIds }, companyId },
-        select: { id: true, quantityInStock: true },
-      });
-      const materialMap = new Map(materials.map((m) => [m.id, m]));
-
-      for (const item of rawMaterialsInput) {
-        const material = materialMap.get(item.rawMaterialId);
-        if (!material) {
-          throw Object.assign(new Error("Raw material not found"), {
-            code: "RAW_MATERIAL_NOT_FOUND",
-          });
-        }
-        if (item.quantityIssued > Number(material.quantityInStock)) {
-          throw Object.assign(new Error("Insufficient stock"), {
-            code: "INSUFFICIENT_RAW_STOCK",
-          });
-        }
-      }
-
-      const workOrder = await tx.workOrder.create({
-        data: {
-          companyId,
-          workOrderName,
-          finishedProductId,
-          finishedProductVariantId,
-          plannedQuantity,
-          rawMaterials: {
-            create: rawMaterialsInput.map((rm) => ({
-              companyId,
-              rawMaterialId: rm.rawMaterialId,
-              quantityIssued: rm.quantityIssued,
-            })),
-          },
-        },
-      });
-
-      for (const item of rawMaterialsInput) {
-        const current = await tx.rawMaterial.findFirst({
-          where: { id: item.rawMaterialId, companyId },
-          select: { quantityInStock: true },
-        });
-        if (!current) {
-          throw Object.assign(new Error("Raw material not found"), {
-            code: "RAW_MATERIAL_NOT_FOUND",
-          });
-        }
-
-        const openingBalance = Number(current.quantityInStock);
-        const closingBalance = openingBalance - item.quantityIssued;
-
-        if (closingBalance < 0) {
-          throw Object.assign(new Error("Insufficient stock"), {
-            code: "INSUFFICIENT_RAW_STOCK",
-          });
-        }
-
-        await tx.rawMaterial.update({
-          where: { id: item.rawMaterialId, companyId },
-          data: {
-            quantityInStock: { decrement: item.quantityIssued },
-          },
-        });
-
-        await tx.rawMaterialLedger.create({
-          data: {
+    await prisma.workOrder.create({
+      data: {
+        companyId,
+        workOrderName,
+        finishedProductId: product.id,
+        finishedProductVariantId,
+        plannedQuantity,
+        rawMaterials: {
+          create: rawMaterialIds.map((rawMaterialId) => ({
             companyId,
-            rawMaterialId: item.rawMaterialId,
-            openingBalance,
-            quantityIn: 0,
-            quantityOut: item.quantityIssued,
-            closingBalance,
-            notes: `Issued to Work Order ${workOrder.workOrderName}`,
-            workOrderId: workOrder.id,
-          },
-        });
-      }
-    }, { timeout: 20000, maxWait: 10000 });
+            rawMaterialId,
+          })),
+        },
+      },
+    });
   } catch (error: unknown) {
     if (
       typeof error === "object" &&
       error !== null &&
-      "code" in error &&
-      (error as { code: string }).code === "PLANNED_INTEGER_REQUIRED"
+      "code" in error
     ) {
-      return { error: "Planned quantity must be a whole number for pieces." };
-    }
-    if (
-      typeof error === "object" &&
-      error !== null &&
-      "code" in error &&
-      (error as { code: string }).code === "INSUFFICIENT_RAW_STOCK"
-    ) {
-      return { error: "Issued quantity cannot exceed current raw material stock." };
-    }
-    if (
-      typeof error === "object" &&
-      error !== null &&
-      "code" in error &&
-      (error as { code: string }).code === "FINISHED_PRODUCT_NOT_FOUND"
-    ) {
-      return { error: "Finished product not found." };
-    }
-    if (
-      typeof error === "object" &&
-      error !== null &&
-      "code" in error &&
-      (error as { code: string }).code === "RAW_MATERIAL_NOT_FOUND"
-    ) {
-      return { error: "Raw material not found." };
-    }
-    if (
-      typeof error === "object" &&
-      error !== null &&
-      "code" in error &&
-      (error as { code: string }).code === "VARIANT_REQUIRED"
-    ) {
-      return { error: "Variant is required for this finished product." };
-    }
-    if (
-      typeof error === "object" &&
-      error !== null &&
-      "code" in error &&
-      (error as { code: string }).code === "VARIANT_NOT_ALLOWED"
-    ) {
-      return { error: "Variant must be empty for this finished product." };
-    }
-    if (
-      typeof error === "object" &&
-      error !== null &&
-      "code" in error &&
-      (error as { code: string }).code === "VARIANT_INVALID"
-    ) {
-      return { error: "Selected variant does not belong to this finished product." };
+      const code = (error as { code: string }).code;
+      switch (code) {
+        case "RAW_MATERIALS_REQUIRED":
+          return { error: "At least one raw material type is required." };
+        case "RAW_MATERIAL_REQUIRED":
+          return { error: "Please select a raw material in every row." };
+        case "RAW_MATERIAL_DUPLICATE":
+          return { error: "Same raw material cannot be selected twice." };
+        case "PLANNED_INTEGER_REQUIRED":
+          return { error: "Planned quantity must be a whole number for pieces." };
+        case "WEIGHT_PER_PIECE_REQUIRED":
+          return { error: "Weight per piece is required for piece-based products." };
+        case "FINISHED_PRODUCT_NOT_FOUND":
+          return { error: "Finished product not found." };
+        case "VARIANT_REQUIRED":
+          return { error: "Variant is required for this finished product." };
+        case "VARIANT_NOT_ALLOWED":
+          return { error: "Variant must be empty for this finished product." };
+        case "VARIANT_INVALID":
+          return { error: "Selected variant does not belong to this finished product." };
+      }
     }
     return { error: "Failed to create work order." };
   }
@@ -507,13 +454,17 @@ export async function addProductionEntry(workOrderId: string, formData: FormData
   const companyId = session.companyId;
 
   const quantityProduced = parseNumber(formData.get("quantityProduced"));
-  const wasteGenerated = parseNumber(formData.get("wasteGenerated") ?? "0");
+  const entryDateRaw = (formData.get("entryDate") as string | null) ?? "";
+  const entryDate = new Date(entryDateRaw);
 
   if (!Number.isFinite(quantityProduced) || quantityProduced <= 0) {
-    return { error: "Quantity produced must be greater than 0." };
+    return { error: "Production quantity must be greater than 0." };
   }
-  if (!Number.isFinite(wasteGenerated) || wasteGenerated < 0) {
-    return { error: "Waste generated cannot be negative." };
+  if (!entryDateRaw || Number.isNaN(entryDate.getTime())) {
+    return { error: "Entry date is required." };
+  }
+  if (entryDate.getTime() > Date.now()) {
+    return { error: "Entry date cannot be in the future." };
   }
 
   try {
@@ -521,9 +472,11 @@ export async function addProductionEntry(workOrderId: string, formData: FormData
       const workOrder = await tx.workOrder.findFirst({
         where: { id: workOrderId, companyId },
         include: {
-          finishedProduct: { select: { id: true, unit: true, quantityInStock: true } },
+          finishedProduct: {
+            select: { id: true, unit: true, quantityInStock: true, weightPerPiece: true },
+          },
           finishedProductVariant: {
-            select: { id: true, quantityInStock: true },
+            select: { id: true, quantityInStock: true, weightPerPiece: true },
           },
         },
       });
@@ -537,13 +490,23 @@ export async function addProductionEntry(workOrderId: string, formData: FormData
         });
       }
 
-      if (
-        workOrder.finishedProduct.unit === "PIECE" &&
-        !Number.isInteger(quantityProduced)
-      ) {
-        throw Object.assign(new Error("Invalid integer"), {
-          code: "PIECE_INTEGER_REQUIRED",
-        });
+      const weightPerPieceKg = workOrder.finishedProductVariant
+        ? Number(workOrder.finishedProductVariant.weightPerPiece)
+        : workOrder.finishedProduct.weightPerPiece != null
+          ? Number(workOrder.finishedProduct.weightPerPiece)
+          : null;
+
+      if (workOrder.finishedProduct.unit === "PIECE") {
+        if (!Number.isInteger(quantityProduced)) {
+          throw Object.assign(new Error("Invalid integer"), {
+            code: "PIECE_INTEGER_REQUIRED",
+          });
+        }
+        if (!Number.isFinite(weightPerPieceKg ?? Number.NaN)) {
+          throw Object.assign(new Error("Missing weight"), {
+            code: "WEIGHT_PER_PIECE_REQUIRED",
+          });
+        }
       }
 
       const productionEntry = await tx.productionEntry.create({
@@ -551,7 +514,7 @@ export async function addProductionEntry(workOrderId: string, formData: FormData
           companyId,
           workOrderId,
           quantityProduced,
-          wasteGenerated,
+          entryDate,
         },
       });
 
@@ -588,42 +551,61 @@ export async function addProductionEntry(workOrderId: string, formData: FormData
           notes: `Produced via Work Order ${workOrder.workOrderName}`,
           workOrderId,
           productionEntryId: productionEntry.id,
+          date: entryDate,
           finishedProductVariantId: workOrder.finishedProductVariant?.id ?? null,
         },
       });
-
-      await refreshWorkOrderStatus(workOrderId, companyId, tx);
     }, { timeout: 20000, maxWait: 10000 });
   } catch (error: unknown) {
-    console.error("updateWorkOrder error:", error);
     if (
       typeof error === "object" &&
       error !== null &&
-      "code" in error &&
-      (error as { code: string }).code === "WORK_ORDER_NOT_FOUND"
+      "code" in error
     ) {
-      return { error: "Work order not found." };
-    }
-    if (
-      typeof error === "object" &&
-      error !== null &&
-      "code" in error &&
-      (error as { code: string }).code === "PIECE_INTEGER_REQUIRED"
-    ) {
-      return { error: "Quantity produced must be a whole number for pieces." };
-    }
-    if (
-      typeof error === "object" &&
-      error !== null &&
-      "code" in error &&
-      (error as { code: string }).code === "FINISHED_PRODUCT_DELETED"
-    ) {
-      return { error: "Finished product is deleted for this work order." };
+      const code = (error as { code: string }).code;
+      switch (code) {
+        case "WORK_ORDER_NOT_FOUND":
+          return { error: "Work order not found." };
+        case "PIECE_INTEGER_REQUIRED":
+          return { error: "Production quantity must be a whole number for pieces." };
+        case "WEIGHT_PER_PIECE_REQUIRED":
+          return { error: "Weight per piece is required for piece-based products." };
+        case "FINISHED_PRODUCT_DELETED":
+          return { error: "Finished product is deleted for this work order." };
+      }
     }
     return { error: "Failed to add production entry." };
   }
 
   revalidatePath(`/production/${workOrderId}`);
+
+  const postAddWorkOrder = await prisma.workOrder.findFirst({
+    where: { id: workOrderId, companyId },
+    select: {
+      status: true,
+      plannedQuantity: true,
+      productionEntries: { select: { quantityProduced: true } },
+    },
+  });
+
+  if (!postAddWorkOrder) {
+    return { success: true as const };
+  }
+
+  const updatedTotalProduced = round2(
+    postAddWorkOrder.productionEntries.reduce(
+      (sum, entry) => sum + Number(entry.quantityProduced),
+      0
+    )
+  );
+  const plannedQuantityNum = Number(postAddWorkOrder.plannedQuantity);
+
+  return {
+    success: true as const,
+    status: postAddWorkOrder.status,
+    updatedTotalProduced,
+    plannedQuantity: plannedQuantityNum,
+  };
 }
 
 export async function updateProductionEntry(entryId: string, formData: FormData) {
@@ -632,13 +614,17 @@ export async function updateProductionEntry(entryId: string, formData: FormData)
   const companyId = session.companyId;
 
   const newQuantityProduced = parseNumber(formData.get("quantityProduced"));
-  const newWasteGenerated = parseNumber(formData.get("wasteGenerated") ?? "0");
+  const entryDateRaw = (formData.get("entryDate") as string | null) ?? "";
+  const newEntryDate = new Date(entryDateRaw);
 
   if (!Number.isFinite(newQuantityProduced) || newQuantityProduced <= 0) {
-    return { error: "Quantity produced must be greater than 0." };
+    return { error: "Production quantity must be greater than 0." };
   }
-  if (!Number.isFinite(newWasteGenerated) || newWasteGenerated < 0) {
-    return { error: "Waste generated cannot be negative." };
+  if (!entryDateRaw || Number.isNaN(newEntryDate.getTime())) {
+    return { error: "Entry date is required." };
+  }
+  if (newEntryDate.getTime() > Date.now()) {
+    return { error: "Entry date cannot be in the future." };
   }
 
   let workOrderIdForRevalidate: string | null = null;
@@ -650,9 +636,11 @@ export async function updateProductionEntry(entryId: string, formData: FormData)
         include: {
           workOrder: {
             include: {
-              finishedProduct: { select: { id: true, unit: true, quantityInStock: true } },
+              finishedProduct: {
+                select: { id: true, unit: true, quantityInStock: true, weightPerPiece: true },
+              },
               finishedProductVariant: {
-                select: { id: true, quantityInStock: true },
+                select: { id: true, quantityInStock: true, weightPerPiece: true },
               },
             },
           },
@@ -674,13 +662,22 @@ export async function updateProductionEntry(entryId: string, formData: FormData)
       const finishedProductVariantId =
         oldEntry.workOrder.finishedProductVariant?.id ?? null;
 
-      if (
-        oldEntry.workOrder.finishedProduct.unit === "PIECE" &&
-        !Number.isInteger(newQuantityProduced)
-      ) {
-        throw Object.assign(new Error("Invalid integer"), {
-          code: "PIECE_INTEGER_REQUIRED",
-        });
+      if (oldEntry.workOrder.finishedProduct.unit === "PIECE") {
+        if (!Number.isInteger(newQuantityProduced)) {
+          throw Object.assign(new Error("Invalid integer"), {
+            code: "PIECE_INTEGER_REQUIRED",
+          });
+        }
+        const weightPerPieceKg = oldEntry.workOrder.finishedProductVariant
+          ? Number(oldEntry.workOrder.finishedProductVariant.weightPerPiece)
+          : oldEntry.workOrder.finishedProduct.weightPerPiece != null
+            ? Number(oldEntry.workOrder.finishedProduct.weightPerPiece)
+            : Number.NaN;
+        if (!Number.isFinite(weightPerPieceKg)) {
+          throw Object.assign(new Error("Missing weight"), {
+            code: "WEIGHT_PER_PIECE_REQUIRED",
+          });
+        }
       }
 
       const oldQuantityProduced = Number(oldEntry.quantityProduced);
@@ -699,7 +696,7 @@ export async function updateProductionEntry(entryId: string, formData: FormData)
         where: { id: entryId, companyId },
         data: {
           quantityProduced: newQuantityProduced,
-          wasteGenerated: newWasteGenerated,
+          entryDate: newEntryDate,
         },
       });
 
@@ -733,57 +730,55 @@ export async function updateProductionEntry(entryId: string, formData: FormData)
           where: { id: linkedLedger.id },
           data: {
             quantityProduced: newQuantityProduced,
+            date: newEntryDate,
           },
         });
       }
-
-      await rebuildFinishedProductLedgerBalances(
-        finishedProductId,
-        finishedProductVariantId,
-        companyId,
-        tx
-      );
-      await refreshWorkOrderStatus(workOrderId, companyId, tx);
     }, { timeout: 20000, maxWait: 10000 });
   } catch (error: unknown) {
     if (
       typeof error === "object" &&
       error !== null &&
-      "code" in error &&
-      (error as { code: string }).code === "ENTRY_NOT_FOUND"
+      "code" in error
     ) {
-      return { error: "Production entry not found." };
-    }
-    if (
-      typeof error === "object" &&
-      error !== null &&
-      "code" in error &&
-      (error as { code: string }).code === "PIECE_INTEGER_REQUIRED"
-    ) {
-      return { error: "Quantity produced must be a whole number for pieces." };
-    }
-    if (
-      typeof error === "object" &&
-      error !== null &&
-      "code" in error &&
-      (error as { code: string }).code === "INSUFFICIENT_FINISHED_STOCK"
-    ) {
-      return { error: "Cannot reduce entry below dispatched stock-adjusted balance." };
-    }
-    if (
-      typeof error === "object" &&
-      error !== null &&
-      "code" in error &&
-      (error as { code: string }).code === "FINISHED_PRODUCT_DELETED"
-    ) {
-      return { error: "Finished product is deleted for this work order." };
+      const code = (error as { code: string }).code;
+      switch (code) {
+        case "ENTRY_NOT_FOUND":
+          return { error: "Production entry not found." };
+        case "PIECE_INTEGER_REQUIRED":
+          return { error: "Production quantity must be a whole number for pieces." };
+        case "WEIGHT_PER_PIECE_REQUIRED":
+          return { error: "Weight per piece is required for piece-based products." };
+        case "INSUFFICIENT_FINISHED_STOCK":
+          return { error: "Cannot reduce entry below dispatch-adjusted stock." };
+        case "FINISHED_PRODUCT_DELETED":
+          return { error: "Finished product is deleted for this work order." };
+      }
     }
     return { error: "Failed to update production entry." };
   }
 
-  if (workOrderIdForRevalidate) {
-    revalidatePath(`/production/${workOrderIdForRevalidate}`);
+  if (!workOrderIdForRevalidate) {
+    return { success: true as const };
   }
+
+  revalidatePath(`/production/${workOrderIdForRevalidate}`);
+
+  const state = await readWorkOrderCompletionState(
+    workOrderIdForRevalidate,
+    companyId
+  );
+
+  if (!state) {
+    return { success: true as const };
+  }
+
+  return {
+    success: true as const,
+    status: state.status,
+    updatedTotalProduced: state.updatedTotalProduced,
+    plannedQuantity: state.plannedQuantity,
+  };
 }
 
 export async function updateWorkOrder(id: string, formData: FormData) {
@@ -799,24 +794,25 @@ export async function updateWorkOrder(id: string, formData: FormData) {
   if (!Number.isFinite(plannedQuantity) || plannedQuantity <= 0) {
     return { error: "Planned quantity must be greater than 0." };
   }
-  if (!rawMaterialsInput || rawMaterialsInput.length === 0) {
-    return { error: "At least one raw material row is required." };
-  }
-  for (const item of rawMaterialsInput) {
-    if (!item.id) return { error: "Raw material row id is required." };
-    if (!Number.isFinite(item.quantityIssued) || item.quantityIssued <= 0) {
-      return { error: "Issued quantity must be greater than 0." };
-    }
+  if (!rawMaterialsInput) {
+    return { error: "At least one raw material type is required." };
   }
 
   try {
+    const rawMaterialIds = validateRawMaterialTypes(
+      rawMaterialsInput.map((rm) => ({ rawMaterialId: rm.rawMaterialId }))
+    );
+
     await prisma.$transaction(async (tx) => {
       const workOrder = await tx.workOrder.findFirst({
         where: { id, companyId },
         include: {
-          finishedProduct: { select: { unit: true } },
-          rawMaterials: true,
-          productionEntries: { select: { quantityProduced: true } },
+          finishedProduct: {
+            select: { id: true, unit: true, weightPerPiece: true },
+          },
+          finishedProductVariant: {
+            select: { id: true, weightPerPiece: true },
+          },
         },
       });
 
@@ -829,15 +825,6 @@ export async function updateWorkOrder(id: string, formData: FormData) {
         });
       }
 
-      const totalProduced = workOrder.productionEntries.reduce(
-        (sum, entry) => sum + Number(entry.quantityProduced),
-        0
-      );
-      if (plannedQuantity < totalProduced) {
-        throw Object.assign(new Error("Planned too low"), {
-          code: "PLANNED_LESS_THAN_PRODUCED",
-        });
-      }
       if (
         workOrder.finishedProduct.unit === "PIECE" &&
         !Number.isInteger(plannedQuantity)
@@ -847,192 +834,229 @@ export async function updateWorkOrder(id: string, formData: FormData) {
         });
       }
 
+      const weightPerPieceKg = workOrder.finishedProductVariant
+        ? Number(workOrder.finishedProductVariant.weightPerPiece)
+        : workOrder.finishedProduct.weightPerPiece != null
+          ? Number(workOrder.finishedProduct.weightPerPiece)
+          : null;
+
+      if (workOrder.finishedProduct.unit === "PIECE" && !Number.isFinite(weightPerPieceKg ?? Number.NaN)) {
+        throw Object.assign(new Error("Missing weight"), {
+          code: "WEIGHT_PER_PIECE_REQUIRED",
+        });
+      }
+
+      const validRawMaterials = await tx.rawMaterial.findMany({
+        where: { id: { in: rawMaterialIds }, companyId },
+        select: { id: true },
+      });
+      if (validRawMaterials.length !== rawMaterialIds.length) {
+        throw Object.assign(new Error("Invalid raw materials"), {
+          code: "RAW_MATERIAL_NOT_FOUND",
+        });
+      }
+
       await tx.workOrder.update({
         where: { id, companyId },
-        data: { plannedQuantity },
+        data: {
+          plannedQuantity,
+          rawMaterials: {
+            deleteMany: {},
+            create: rawMaterialIds.map((rawMaterialId) => ({
+              companyId,
+              rawMaterialId,
+            })),
+          },
+        },
       });
-
-      const existingById = new Map(workOrder.rawMaterials.map((rm) => [rm.id, rm]));
-      const affectedRawMaterialIds = new Set<string>();
-
-      for (const item of rawMaterialsInput) {
-        const existing = existingById.get(item.id);
-        if (!existing) {
-          throw Object.assign(new Error("Invalid row"), {
-            code: "WORK_ORDER_RM_NOT_FOUND",
-          });
-        }
-
-        const oldQty = Number(existing.quantityIssued);
-        const newQty = item.quantityIssued;
-        const diff = newQty - oldQty;
-
-        if (diff === 0) continue;
-
-        const rawMaterial = await tx.rawMaterial.findFirst({
-          where: { id: existing.rawMaterialId, companyId },
-          select: { quantityInStock: true },
-        });
-        if (!rawMaterial) {
-          throw Object.assign(new Error("Raw material missing"), {
-            code: "RAW_MATERIAL_NOT_FOUND",
-          });
-        }
-
-        const openingBalance = Number(rawMaterial.quantityInStock);
-
-        if (diff > 0) {
-          if (diff > openingBalance) {
-            throw Object.assign(new Error("Insufficient stock"), {
-              code: "INSUFFICIENT_RAW_STOCK",
-            });
-          }
-
-          const closingBalance = openingBalance - diff;
-
-          await tx.rawMaterial.update({
-            where: { id: existing.rawMaterialId, companyId },
-            data: { quantityInStock: { decrement: diff } },
-          });
-
-          await tx.rawMaterialLedger.create({
-            data: {
-              companyId,
-              rawMaterialId: existing.rawMaterialId,
-              openingBalance,
-              quantityIn: 0,
-              quantityOut: diff,
-              closingBalance,
-              notes: `Additional issue to Work Order ${workOrder.workOrderName}`,
-              workOrderId: id,
-            },
-          });
-        } else {
-          const returned = Math.abs(diff);
-          const closingBalance = openingBalance + returned;
-
-          await tx.rawMaterial.update({
-            where: { id: existing.rawMaterialId, companyId },
-            data: { quantityInStock: { increment: returned } },
-          });
-
-          await tx.rawMaterialLedger.create({
-            data: {
-              companyId,
-              rawMaterialId: existing.rawMaterialId,
-              openingBalance,
-              quantityIn: returned,
-              quantityOut: 0,
-              closingBalance,
-              notes: `Returned from Work Order ${workOrder.workOrderName}`,
-              workOrderId: id,
-            },
-          });
-        }
-
-        await tx.workOrderRawMaterial.update({
-          where: { id: existing.id, companyId },
-          data: { quantityIssued: newQty },
-        });
-
-        affectedRawMaterialIds.add(existing.rawMaterialId);
-      }
-
-      for (const rawMaterialId of affectedRawMaterialIds) {
-        await rebuildRawMaterialLedgerBalances(rawMaterialId, companyId, tx);
-      }
-
-      await refreshWorkOrderStatus(id, companyId, tx);
     }, { timeout: 20000, maxWait: 10000 });
   } catch (error: unknown) {
     if (
       typeof error === "object" &&
       error !== null &&
-      "code" in error &&
-      (error as { code: string }).code === "WORK_ORDER_NOT_FOUND"
+      "code" in error
     ) {
-      return { error: "Work order not found." };
+      const code = (error as { code: string }).code;
+      switch (code) {
+        case "WORK_ORDER_NOT_FOUND":
+          return { error: "Work order not found." };
+        case "PLANNED_INTEGER_REQUIRED":
+          return { error: "Planned quantity must be a whole number for pieces." };
+        case "WEIGHT_PER_PIECE_REQUIRED":
+          return { error: "Weight per piece is required for piece-based products." };
+        case "FINISHED_PRODUCT_DELETED":
+          return { error: "Finished product is deleted for this work order." };
+        case "RAW_MATERIALS_REQUIRED":
+          return { error: "At least one raw material type is required." };
+        case "RAW_MATERIAL_REQUIRED":
+          return { error: "Please select a raw material in every row." };
+        case "RAW_MATERIAL_DUPLICATE":
+          return { error: "Same raw material cannot be selected twice." };
+        case "RAW_MATERIAL_NOT_FOUND":
+          return { error: "One or more raw materials are invalid." };
+      }
     }
-    if (
-      typeof error === "object" &&
-      error !== null &&
-      "code" in error &&
-      (error as { code: string }).code === "PLANNED_LESS_THAN_PRODUCED"
-    ) {
-      return { error: "Planned quantity cannot be less than total produced." };
-    }
-    if (
-      typeof error === "object" &&
-      error !== null &&
-      "code" in error &&
-      (error as { code: string }).code === "PLANNED_INTEGER_REQUIRED"
-    ) {
-      return { error: "Planned quantity must be a whole number for pieces." };
-    }
-    if (
-      typeof error === "object" &&
-      error !== null &&
-      "code" in error &&
-      (error as { code: string }).code === "FINISHED_PRODUCT_DELETED"
-    ) {
-      return { error: "Finished product is deleted for this work order." };
-    }
-    if (
-      typeof error === "object" &&
-      error !== null &&
-      "code" in error &&
-      (error as { code: string }).code === "WORK_ORDER_RM_NOT_FOUND"
-    ) {
-      return { error: "Invalid work order raw material row." };
-    }
-    if (
-      typeof error === "object" &&
-      error !== null &&
-      "code" in error &&
-      (error as { code: string }).code === "RAW_MATERIAL_NOT_FOUND"
-    ) {
-      return { error: "Raw material not found." };
-    }
-    if (
-      typeof error === "object" &&
-      error !== null &&
-      "code" in error &&
-      (error as { code: string }).code === "INSUFFICIENT_RAW_STOCK"
-    ) {
-      return { error: "Issued quantity cannot exceed current stock." };
-    }
-    if (
-      typeof error === "object" &&
-      error !== null &&
-      "code" in error &&
-      (error as { code: string }).code === "P2021"
-    ) {
-      return {
-        error:
-          "Database table is missing. Please run the latest Prisma migration.",
-      };
-    }
-    if (
-      typeof error === "object" &&
-      error !== null &&
-      "code" in error &&
-      (error as { code: string }).code === "P2022"
-    ) {
-      return {
-        error:
-          "Database column is missing. Please run the latest Prisma migration.",
-      };
-    }
-    if (
-      typeof error === "object" &&
-      error !== null &&
-      "message" in error &&
-      typeof (error as { message: unknown }).message === "string"
-    ) {
-      return { error: (error as { message: string }).message };
-    }
-    return { error: "Failed to update work order due to an unknown error." };
+
+    return { error: "Failed to update work order." };
   }
 
   revalidatePath(`/production/${id}`);
+
+  const state = await readWorkOrderCompletionState(id, companyId);
+
+  if (!state) {
+    return { success: true as const };
+  }
+
+  return {
+    success: true as const,
+    status: state.status,
+    updatedTotalProduced: state.updatedTotalProduced,
+    plannedQuantity: state.plannedQuantity,
+  };
+}
+
+export async function completeWorkOrder(id: string) {
+  const session = await getAuthSession();
+  if (!session?.companyId) throw new Error("Unauthorized");
+  const companyId = session.companyId;
+
+  try {
+    await prisma.$transaction(
+      async (tx) => {
+        const workOrder = await tx.workOrder.findFirst({
+          where: { id, companyId },
+          select: {
+            id: true,
+            status: true,
+            plannedQuantity: true,
+            productionEntries: { select: { quantityProduced: true } },
+          },
+        });
+
+        if (!workOrder) {
+          throw Object.assign(new Error("Not found"), {
+            code: "WORK_ORDER_NOT_FOUND",
+          });
+        }
+
+        if (workOrder.status === "COMPLETED") {
+          throw Object.assign(new Error("Already completed"), {
+            code: "ALREADY_COMPLETED",
+          });
+        }
+
+        if (workOrder.status === "CANCELLED") {
+          throw Object.assign(new Error("Cancelled"), {
+            code: "WORK_ORDER_CANCELLED",
+          });
+        }
+
+        const totalProduced = workOrder.productionEntries.reduce(
+          (sum, entry) => sum + Number(entry.quantityProduced),
+          0
+        );
+        if (totalProduced <= 0) {
+          throw Object.assign(new Error("Zero production"), {
+            code: "ZERO_PRODUCTION",
+          });
+        }
+
+        await tx.workOrder.update({
+          where: { id, companyId },
+          data: {
+            status: "COMPLETED",
+            completedAt: new Date(),
+          },
+        });
+      },
+      { timeout: 20000, maxWait: 10000 }
+    );
+  } catch (error: unknown) {
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error
+    ) {
+      const code = (error as { code: string }).code;
+      switch (code) {
+        case "WORK_ORDER_NOT_FOUND":
+          return { error: "Work order not found." };
+        case "ALREADY_COMPLETED":
+          return { error: "Work order is already completed." };
+        case "WORK_ORDER_CANCELLED":
+          return { error: "Cancelled work orders cannot be completed." };
+        case "ZERO_PRODUCTION":
+          return { error: "Cannot complete a work order with 0 production." };
+      }
+    }
+    return { error: "Failed to complete work order." };
+  }
+
+  revalidatePath("/production");
+  revalidatePath(`/production/${id}`);
+  return { success: true };
+}
+
+export async function reopenWorkOrder(id: string) {
+  const session = await getAuthSession();
+  if (!session?.companyId) throw new Error("Unauthorized");
+  const companyId = session.companyId;
+
+  const isAdmin =
+    session.globalRole === "SUPER_ADMIN" || session.companyRole === "ADMIN";
+  if (!isAdmin) {
+    return { error: "Only admins can reopen work orders." };
+  }
+
+  try {
+    await prisma.$transaction(
+      async (tx) => {
+        const workOrder = await tx.workOrder.findFirst({
+          where: { id, companyId },
+          select: { id: true, status: true },
+        });
+
+        if (!workOrder) {
+          throw Object.assign(new Error("Not found"), {
+            code: "WORK_ORDER_NOT_FOUND",
+          });
+        }
+
+        if (workOrder.status !== "COMPLETED") {
+          throw Object.assign(new Error("Not completed"), {
+            code: "NOT_COMPLETED",
+          });
+        }
+
+        await tx.workOrder.update({
+          where: { id, companyId },
+          data: {
+            status: "OPEN",
+            completedAt: null,
+          },
+        });
+      },
+      { timeout: 20000, maxWait: 10000 }
+    );
+  } catch (error: unknown) {
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error
+    ) {
+      const code = (error as { code: string }).code;
+      switch (code) {
+        case "WORK_ORDER_NOT_FOUND":
+          return { error: "Work order not found." };
+        case "NOT_COMPLETED":
+          return { error: "Only completed work orders can be reopened." };
+      }
+    }
+    return { error: "Failed to reopen work order." };
+  }
+
+  revalidatePath("/production");
+  revalidatePath(`/production/${id}`);
+  return { success: true };
 }
