@@ -1003,8 +1003,7 @@ export async function reopenWorkOrder(id: string) {
   if (!session?.companyId) throw new Error("Unauthorized");
   const companyId = session.companyId;
 
-  const isAdmin =
-    session.globalRole === "SUPER_ADMIN" || session.companyRole === "ADMIN";
+  const isAdmin = session.role === "SUPER_ADMIN" || session.role === "ADMIN";
   if (!isAdmin) {
     return { error: "Only admins can reopen work orders." };
   }

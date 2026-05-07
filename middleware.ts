@@ -1,63 +1,120 @@
-import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-const PUBLIC_PATHS = [
-  "/login",
-  "/auth/callback",
-  "/auth/forgot-password",
-  "/auth/reset-password",
-];
+import { verifyTokenEdge } from "@/lib/edge-auth";
 
-function isPublicPath(pathname: string) {
-  return PUBLIC_PATHS.some(
-    (publicPath) =>
-      pathname === publicPath || pathname.startsWith(`${publicPath}/`)
-  );
+function toLoginRedirect(request: NextRequest) {
+  const loginUrl = request.nextUrl.clone();
+  loginUrl.pathname = "/login";
+  loginUrl.search = "";
+  return NextResponse.redirect(loginUrl);
+}
+
+function toDashboardRedirect(request: NextRequest) {
+  const dashboardUrl = request.nextUrl.clone();
+  dashboardUrl.pathname = "/dashboard";
+  dashboardUrl.search = "";
+  return NextResponse.redirect(dashboardUrl);
+}
+
+function toSuperAdminDashboardRedirect(request: NextRequest) {
+  const superAdminUrl = request.nextUrl.clone();
+  superAdminUrl.pathname = "/super-admin/dashboard";
+  superAdminUrl.search = "";
+  return NextResponse.redirect(superAdminUrl);
 }
 
 export async function middleware(request: NextRequest) {
-  let response = NextResponse.next({ request });
-
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() {
-          return request.cookies.getAll();
-        },
-        setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value }) => {
-            request.cookies.set(name, value);
-          });
-          response = NextResponse.next({ request });
-          cookiesToSet.forEach(({ name, value, options }) => {
-            response.cookies.set(name, value, options);
-          });
-        },
-      },
-    }
-  );
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
   const { pathname } = request.nextUrl;
 
-  if (!user && !isPublicPath(pathname)) {
-    const loginUrl = request.nextUrl.clone();
-    loginUrl.pathname = "/login";
-    loginUrl.search = "";
-    loginUrl.searchParams.set("redirectedFrom", pathname);
-    return NextResponse.redirect(loginUrl);
+  if (
+    pathname === "/login" ||
+    pathname.startsWith("/api") ||
+    pathname.startsWith("/_next")
+  ) {
+    return NextResponse.next();
   }
 
-  return response;
+  const token = request.cookies.get("auth_token")?.value;
+  if (!token) {
+    return toLoginRedirect(request);
+  }
+
+  const decoded = await verifyTokenEdge(token);
+  if (!decoded) {
+    return toLoginRedirect(request);
+  }
+
+  const role = typeof decoded === "object" && decoded ? decoded.role : null;
+  const impersonatedCompanyId =
+    typeof decoded === "object" &&
+    decoded &&
+    typeof decoded.impersonatedCompanyId === "string"
+      ? decoded.impersonatedCompanyId
+      : null;
+
+  const isSuperAdmin = typeof role === "string" && role === "SUPER_ADMIN";
+  const isAdmin = typeof role === "string" && role === "ADMIN";
+  const isManager = typeof role === "string" && role === "MANAGER";
+  const isOperator = typeof role === "string" && role === "OPERATOR";
+  const isSuperAdminRoute =
+    pathname === "/super-admin" || pathname.startsWith("/super-admin/");
+
+  if (isSuperAdminRoute && !isSuperAdmin) {
+    return toDashboardRedirect(request);
+  }
+
+  // SUPER_ADMIN access rules
+  if (isSuperAdmin) {
+    if (isSuperAdminRoute) {
+      return NextResponse.next();
+    }
+
+    if (!impersonatedCompanyId) {
+      return toSuperAdminDashboardRedirect(request);
+    }
+
+    return NextResponse.next();
+  }
+
+  // ADMIN has unrestricted company access
+  if (isAdmin) {
+    return NextResponse.next();
+  }
+
+  const isReportsRoute = pathname === "/reports" || pathname.startsWith("/reports/");
+  const isAttendanceRoute =
+    pathname === "/attendance" || pathname.startsWith("/attendance/");
+  const isEmployeesRoute = pathname === "/employees" || pathname.startsWith("/employees/");
+  const isFinishedGoodsRoute =
+    pathname === "/finished-products" || pathname.startsWith("/finished-products/");
+  const isWasteRoute =
+    pathname === "/finished-products/waste" ||
+    pathname.startsWith("/finished-products/waste/");
+  const isSettingsRoute = pathname === "/settings" || pathname.startsWith("/settings/");
+
+  // Existing MANAGER/OPERATOR restrictions
+  if (isOperator) {
+    if (
+      isReportsRoute ||
+      isAttendanceRoute ||
+      isEmployeesRoute ||
+      isFinishedGoodsRoute ||
+      isWasteRoute ||
+      isSettingsRoute
+    ) {
+      return toDashboardRedirect(request);
+    }
+  }
+
+  if (isManager) {
+    if (isReportsRoute || isSettingsRoute) {
+      return toDashboardRedirect(request);
+    }
+  }
+
+  return NextResponse.next();
 }
 
 export const config = {
-  matcher: [
-    "/((?!_next/static|_next/image|favicon\\.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|css|js|map|woff2?|ttf|otf)).*)",
-  ],
+  matcher: ["/((?!_next|api|favicon.ico).*)"],
 };

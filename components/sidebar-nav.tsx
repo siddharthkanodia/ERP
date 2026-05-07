@@ -11,16 +11,20 @@ import {
   BarChart3,
   Boxes,
   LayoutDashboard,
+  Settings,
   type LucideIcon,
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
+type SidebarRole = "SUPER_ADMIN" | "ADMIN" | "MANAGER" | "OPERATOR";
+
 type NavItem = {
   label: string;
   href: string;
   Icon: LucideIcon;
-  children?: { label: string; href: string }[];
+  allowedRoles: SidebarRole[];
+  children?: { label: string; href: string; allowedRoles: SidebarRole[] }[];
 };
 
 const navItems: NavItem[] = [
@@ -28,51 +32,82 @@ const navItems: NavItem[] = [
     label: "Dashboard",
     href: "/dashboard",
     Icon: LayoutDashboard,
+    allowedRoles: ["ADMIN", "MANAGER", "OPERATOR"],
   },
   {
     label: "Raw Materials",
     href: "/raw-materials",
     Icon: Database,
+    allowedRoles: ["ADMIN", "MANAGER", "OPERATOR"],
   },
   {
     label: "Production Floor",
     href: "/production-floor",
     Icon: Boxes,
+    allowedRoles: ["ADMIN", "MANAGER", "OPERATOR"],
   },
   {
     label: "Work Orders",
     href: "/production",
     Icon: Factory,
+    allowedRoles: ["ADMIN", "MANAGER", "OPERATOR"],
   },
   {
     label: "Finished Goods",
     href: "/finished-products",
     Icon: PackageCheck,
-    children: [{ label: "Waste", href: "/finished-products/waste" }],
+    allowedRoles: ["ADMIN", "MANAGER"],
+    children: [
+      {
+        label: "Waste",
+        href: "/finished-products/waste",
+        allowedRoles: ["ADMIN", "MANAGER"],
+      },
+    ],
   },
   {
     label: "Employees",
     href: "/employees",
     Icon: Users,
+    allowedRoles: ["ADMIN", "MANAGER"],
   },
   {
     label: "Attendance",
     href: "/attendance",
     Icon: ClipboardList,
+    allowedRoles: ["ADMIN", "MANAGER"],
   },
   {
     label: "Reports",
     href: "/reports",
     Icon: BarChart3,
+    allowedRoles: ["ADMIN"],
+  },
+  {
+    label: "Settings",
+    href: "/settings/users",
+    Icon: Settings,
+    allowedRoles: ["ADMIN"],
   },
 ];
 
-export function SidebarNav() {
+function isAllowed(role: SidebarRole, allowedRoles: SidebarRole[]) {
+  if (role === "SUPER_ADMIN") return true;
+  return allowedRoles.includes(role);
+}
+
+export function SidebarNav({ role = "OPERATOR" }: { role?: SidebarRole }) {
   const pathname = usePathname();
+  const items = navItems
+    .filter((item) => isAllowed(role, item.allowedRoles))
+    .map((item) => ({
+      ...item,
+      children: item.children?.filter((child) => isAllowed(role, child.allowedRoles)),
+    }));
 
   return (
     <nav className="flex-1 space-y-1 px-2 py-2">
-      {navItems.map(({ label, href, Icon, children }) => {
+      {items.map(({ label, href, Icon, children }) => {
         const isActive =
           pathname === href || pathname.startsWith(`${href}/`);
 

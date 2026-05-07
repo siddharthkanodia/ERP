@@ -1,22 +1,19 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
 import { useState, type FormEvent } from "react";
+import { Eye, EyeOff } from "lucide-react";
 
+import { loginUser } from "@/actions/auth";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { createBrowserClient } from "@/lib/supabase/client";
 
 export function LoginForm() {
-  const router = useRouter();
-  const searchParams = useSearchParams();
-  const redirectedFrom = searchParams.get("redirectedFrom");
-
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
@@ -25,22 +22,18 @@ export function LoginForm() {
     setError(null);
     setIsLoading(true);
 
-    const supabase = createBrowserClient();
-    const { error: signInError } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
+    try {
+      const formData = new FormData();
+      formData.set("email", email);
+      formData.set("password", password);
+      await loginUser(formData);
+    } catch (err: unknown) {
+      // Next.js redirect throws internally — do not treat as error
+      if (err instanceof Error && err.message === "NEXT_REDIRECT") return;
 
-    if (signInError) {
-      setError(signInError.message);
+      setError(err instanceof Error ? err.message : "Something went wrong");
       setIsLoading(false);
-      return;
     }
-
-    const destination =
-      redirectedFrom && redirectedFrom.startsWith("/") ? redirectedFrom : "/dashboard";
-    router.replace(destination);
-    router.refresh();
   }
 
   return (
@@ -72,15 +65,24 @@ export function LoginForm() {
                 Forgot password?
               </Link>
             </div>
-            <Input
-              id="password"
-              type="password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              required
-              autoComplete="current-password"
-              disabled={isLoading}
-            />
+            <div className="relative">
+              <Input
+                id="password"
+                type={showPassword ? "text" : "password"}
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                required
+                autoComplete="current-password"
+                disabled={isLoading}
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              >
+                {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+              </button>
+            </div>
           </div>
           {error ? (
             <p className="text-sm text-destructive" role="alert">

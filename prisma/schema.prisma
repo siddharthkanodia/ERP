@@ -78,6 +78,13 @@ enum CompanyRole {
   OPERATOR
 }
 
+enum UserRole {
+  SUPER_ADMIN
+  ADMIN
+  MANAGER
+  OPERATOR
+}
+
 // ─────────────────────────────────────────────
 // Platform / tenancy models
 // ─────────────────────────────────────────────
@@ -85,6 +92,10 @@ enum CompanyRole {
 model Company {
   id        String   @id @default(cuid())
   name      String
+  industry  String?
+  phone     String?
+  address   String?
+  logoUrl   String?
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -104,18 +115,25 @@ model Company {
   employees               Employee[]
   attendance              Attendance[]
   leaves                  Leave[]
+  users                   User[]
 }
 
 model User {
-  id             String     @id @default(cuid())
-  email          String     @unique
-  supabaseUserId String     @unique
-  globalRole     GlobalRole @default(USER)
-  isActive       Boolean    @default(true)
-  createdAt      DateTime   @default(now())
-  updatedAt      DateTime   @updatedAt
+  id        String   @id @default(cuid())
+  companyId String?
+  company   Company? @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  name      String
+  email     String   @unique
+  password  String
+  role      UserRole @default(OPERATOR)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   memberships CompanyMembership[]
+
+  @@index([companyId])
+  @@index([email])
 }
 
 model CompanyMembership {
@@ -405,4 +423,13 @@ model Leave {
   updatedAt DateTime @updatedAt
 
   @@index([companyId])
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String
+  action    String
+  companyId String?
+  metadata  Json?
+  createdAt DateTime @default(now())
 }

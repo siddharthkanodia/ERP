@@ -1,45 +1,77 @@
-import { CompanyRole, GlobalRole } from "@prisma/client";
+import bcrypt from "bcryptjs";
+import { SignJWT, jwtVerify } from "jose";
+import { cookies } from "next/headers";
 
 import { prisma } from "@/lib/prisma";
-import { createServerClient } from "@/lib/supabase/server";
 
-export type AuthSession = {
+const JWT_SECRET = new TextEncoder().encode(process.env.JWT_SECRET!);
+
+export async function hashPassword(password: string) {
+  return bcrypt.hash(password, 10);
+}
+
+export async function comparePassword(password: string, hash: string) {
+  return bcrypt.compare(password, hash);
+}
+
+export async function signToken(payload: {
   userId: string;
-  supabaseUserId: string;
-  email: string;
-  globalRole: GlobalRole;
-  companyId: string | null;
-  companyRole: CompanyRole | null;
-};
+  role: string;
+  companyId?: string | null;
+  impersonatedCompanyId?: string | null;
+}) {
+  return new SignJWT(payload)
+    .setProtectedHeader({ alg: "HS256" })
+    .setExpirationTime("7d")
+    .sign(JWT_SECRET);
+}
 
-export async function getAuthSession(): Promise<AuthSession | null> {
-  const supabase = await createServerClient();
-  const {
-    data: { user: supabaseUser },
-  } = await supabase.auth.getUser();
-
-  if (!supabaseUser) return null;
-
-  const dbUser = await prisma.user.findUnique({
-    where: { supabaseUserId: supabaseUser.id },
-  });
-  if (!dbUser) return null;
-
-  const membership = await prisma.companyMembership.findFirst({
-    where: { userId: dbUser.id },
-    orderBy: { createdAt: "asc" },
-  });
-
-  if (dbUser.globalRole === GlobalRole.USER && !membership) {
+export async function verifyToken(token: string) {
+  try {
+    const { payload } = await jwtVerify(token, JWT_SECRET);
+    return payload;
+  } catch {
     return null;
   }
+}
+
+export async function getAuthSession() {
+  const cookieStore = await cookies();
+  const token = cookieStore.get("auth_token")?.value;
+
+  if (!token) return null;
+
+  const payload = await verifyToken(token);
+  if (!payload) return null;
+
+  const payloadUserId =
+    typeof payload.userId === "string" ? payload.userId : null;
+  const payloadCompanyId =
+    typeof payload.companyId === "string" ? payload.companyId : null;
+  const payloadImpersonatedCompanyId =
+    typeof payload.impersonatedCompanyId === "string"
+      ? payload.impersonatedCompanyId
+      : null;
+
+  if (!payloadUserId) return null;
+
+  const user = await prisma.user.findUnique({
+    where: { id: payloadUserId },
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      role: true,
+      companyId: true,
+      isActive: true,
+    },
+  });
+
+  if (!user || !user.isActive) return null;
 
   return {
-    userId: dbUser.id,
-    supabaseUserId: dbUser.supabaseUserId,
-    email: dbUser.email ?? supabaseUser.email ?? "",
-    globalRole: dbUser.globalRole,
-    companyId: membership?.companyId ?? null,
-    companyRole: membership?.role ?? null,
+    ...user,
+    companyId: payloadCompanyId ?? user.companyId,
+    impersonatedCompanyId: payloadImpersonatedCompanyId,
   };
 }

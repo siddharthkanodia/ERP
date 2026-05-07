@@ -43,8 +43,7 @@ export default async function WorkOrderDetailPage({
   const unitLabel = workOrder.finishedProductUnit === "PIECE" ? "pcs" : "kg";
   const unit = workOrder.finishedProductUnit ?? "KG";
 
-  const isAdmin =
-    session?.globalRole === "SUPER_ADMIN" || session?.companyRole === "ADMIN";
+  const isAdmin = session?.role === "SUPER_ADMIN" || session?.role === "ADMIN";
   const isCompleted = workOrder.status === "COMPLETED";
   const isReadOnly = isCompleted;
 

@@ -1,9 +1,7 @@
 "use server";
 
-import { createClient } from "@supabase/supabase-js";
-
-import { getAuthSession } from "@/lib/auth";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { comparePassword, getAuthSession, hashPassword } from "@/lib/auth";
+import { prisma } from "@/lib/prisma";
 
 type ChangePasswordInput = {
   currentPassword: string;
@@ -36,35 +34,25 @@ export async function changePassword(
     };
   }
 
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  if (!url || !anonKey) {
-    return { success: false, error: "Supabase is not configured." };
+  const dbUser = await prisma.user.findUnique({
+    where: { id: session.id },
+    select: { password: true },
+  });
+  if (!dbUser) {
+    return { success: false, error: "Unauthorized" };
   }
 
-  // Verify current password using an isolated client so the active session
-  // cookies are never overwritten. `persistSession: false` ensures no tokens
-  // are stored in cookies or local storage.
-  const verifier = createClient(url, anonKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-  const { error: verifyError } = await verifier.auth.signInWithPassword({
-    email: session.email,
-    password: currentPassword,
-  });
-  if (verifyError) {
+  const passwordMatches = await comparePassword(currentPassword, dbUser.password);
+  if (!passwordMatches) {
     return { success: false, error: "Current password is incorrect" };
   }
 
   try {
-    const admin = createAdminClient();
-    const { error: updateError } = await admin.auth.admin.updateUserById(
-      session.supabaseUserId,
-      { password: newPassword }
-    );
-    if (updateError) {
-      return { success: false, error: updateError.message };
-    }
+    const hashedPassword = await hashPassword(newPassword);
+    await prisma.user.update({
+      where: { id: session.id },
+      data: { password: hashedPassword },
+    });
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Failed to update password.";
