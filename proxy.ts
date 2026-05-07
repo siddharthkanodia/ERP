@@ -23,7 +23,7 @@ function toSuperAdminDashboardRedirect(request: NextRequest) {
   return NextResponse.redirect(superAdminUrl);
 }
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   if (
@@ -116,5 +116,7 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!_next|api|favicon.ico).*)"],
+  matcher: [
+    "/((?!api|_next/static|_next/image|favicon.ico|auth/callback).*)",
+  ],
 };
