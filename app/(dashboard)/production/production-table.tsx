@@ -271,6 +271,40 @@ function sortRows(rows: WorkOrderRow[], state: SortState): WorkOrderRow[] {
   return copy;
 }
 
+function SortButton({
+  k,
+  label,
+  sort,
+  onSort,
+  thButtonClass,
+}: {
+  k: SortKey;
+  label: string;
+  sort: SortState;
+  onSort: (key: SortKey) => void;
+  thButtonClass: string;
+}) {
+  const isActive = sort.key === k;
+  return (
+    <button
+      type="button"
+      className={cn(
+        thButtonClass,
+        isActive && "text-foreground"
+      )}
+      onClick={() => onSort(k)}
+    >
+      {label}
+      <ArrowUpDown
+        className={cn(
+          "size-3.5",
+          isActive ? "text-foreground" : "text-muted-foreground"
+        )}
+      />
+    </button>
+  );
+}
+
 function WorkOrderTableView({
   rows,
   sort,
@@ -293,63 +327,41 @@ function WorkOrderTableView({
     );
   }
 
-  function SortButton({ k, label }: { k: SortKey; label: string }) {
-    const isActive = sort.key === k;
-    return (
-      <button
-        type="button"
-        className={cn(
-          thButtonClass,
-          isActive && "text-foreground"
-        )}
-        onClick={() => onSort(k)}
-      >
-        {label}
-        <ArrowUpDown
-          className={cn(
-            "size-3.5",
-            isActive ? "text-foreground" : "text-muted-foreground"
-          )}
-        />
-      </button>
-    );
-  }
-
   return (
     <div className="overflow-x-auto rounded-md border bg-card">
       <table className="min-w-full border-collapse text-sm">
         <thead>
           <tr className="border-b bg-muted/40 text-left">
             <th className="px-3 py-2">
-              <SortButton k="workOrderName" label="Work Order Name" />
+              <SortButton k="workOrderName" label="Work Order Name" sort={sort} onSort={onSort} thButtonClass={thButtonClass} />
             </th>
             <th className="px-3 py-2">
-              <SortButton k="finishedProduct" label="Finished Product" />
+              <SortButton k="finishedProduct" label="Finished Product" sort={sort} onSort={onSort} thButtonClass={thButtonClass} />
             </th>
             <th className="px-3 py-2">
-              <SortButton k="variant" label="Variant" />
+              <SortButton k="variant" label="Variant" sort={sort} onSort={onSort} thButtonClass={thButtonClass} />
             </th>
             <th className="px-3 py-2 text-right">
-              <SortButton k="plannedQuantity" label="Planned Qty" />
+              <SortButton k="plannedQuantity" label="Planned Qty" sort={sort} onSort={onSort} thButtonClass={thButtonClass} />
             </th>
             <th className="px-3 py-2 text-right">
-              <SortButton k="totalProduced" label="Actual Qty" />
+              <SortButton k="totalProduced" label="Actual Qty" sort={sort} onSort={onSort} thButtonClass={thButtonClass} />
             </th>
             <th className="px-3 py-2 text-right">
-              <SortButton k="variance" label="Variance" />
+              <SortButton k="variance" label="Variance" sort={sort} onSort={onSort} thButtonClass={thButtonClass} />
             </th>
             <th className="px-3 py-2 text-right">
-              <SortButton k="completion" label="Completion %" />
+              <SortButton k="completion" label="Completion %" sort={sort} onSort={onSort} thButtonClass={thButtonClass} />
             </th>
             <th className="px-3 py-2 text-right">
-              <SortButton k="consumption" label="RM Consumption" />
+              <SortButton k="consumption" label="RM Consumption" sort={sort} onSort={onSort} thButtonClass={thButtonClass} />
             </th>
             <th className="px-3 py-2">
-              <SortButton k="rawMaterials" label="Raw Material Types" />
+              <SortButton k="rawMaterials" label="Raw Material Types" sort={sort} onSort={onSort} thButtonClass={thButtonClass} />
             </th>
             <th className="px-3 py-2">Status</th>
             <th className="px-3 py-2">
-              <SortButton k="createdAt" label="Created On" />
+              <SortButton k="createdAt" label="Created On" sort={sort} onSort={onSort} thButtonClass={thButtonClass} />
             </th>
           </tr>
         </thead>
