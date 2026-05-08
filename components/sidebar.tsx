@@ -20,7 +20,7 @@ export async function Sidebar() {
       : null;
 
   return (
-    <aside className="hidden h-screen w-60 shrink-0 border-r bg-zinc-50 md:block">
+    <aside className="h-screen w-60 shrink-0 border-r bg-zinc-50">
       <div className="flex h-full flex-col">
         <div className="border-b px-4 py-3">
           <div className="flex items-center gap-2">
