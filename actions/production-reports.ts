@@ -27,10 +27,6 @@ function toISTDateKey(utcDate: Date): string {
   return `${y}-${m}-${d}`;
 }
 
-function r2(n: number) {
-  return Math.round(n * 100) / 100;
-}
-
 // ─── Exported types ──────────────────────────────────────────────────────────
 
 export type VariantGroup = {

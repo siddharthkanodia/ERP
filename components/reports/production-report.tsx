@@ -395,7 +395,8 @@ export function ProductionReport({
   function toggleDaily(key: string) {
     setExpandedDailyIds((prev) => {
       const next = new Set(prev);
-      next.has(key) ? next.delete(key) : next.add(key);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
       return next;
     });
   }
@@ -413,7 +414,8 @@ export function ProductionReport({
   function toggleMonthly(key: string) {
     setExpandedMonthlyIds((prev) => {
       const next = new Set(prev);
-      next.has(key) ? next.delete(key) : next.add(key);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
       return next;
     });
   }
