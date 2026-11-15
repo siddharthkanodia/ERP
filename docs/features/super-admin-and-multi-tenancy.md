@@ -72,7 +72,7 @@ No `AuditLog` row is written on entering or exiting impersonation (contrast with
 
 `workOrderRawMaterial → workOrder → productionEntry → productionFloorLedger → productionFloorStock → rawMaterialLedger → finishedProductLedger → finishedProductVariant → finishedProduct → rawMaterial → leave → attendance → employee → department`
 
-Then `User.updateMany({companyId: null})` — **users belonging to the company are not deleted**, only detached (their `companyId` becomes `null`; they remain able to log in with whatever role they had). Then `auditLog.deleteMany({companyId})`, then `company.delete()`. On success, one new `AuditLog` row is written: `{action: "COMPANY_DELETED", companyId: null, metadata: {deletedCompanyId}}`. Any thrown error during the transaction is caught and surfaced as `{error: "Failed to delete company. Please try again."}`.
+Then `User.updateMany({companyId: null})` — **users belonging to the company are not deleted**, only detached (their `companyId` becomes `null`; they remain able to log in with whatever role they had). Then `auditLog.deleteMany({companyId})`, then `companyMembership.deleteMany({companyId})`, then `company.delete()`. On success, one new `AuditLog` row is written: `{action: "COMPANY_DELETED", companyId: null, metadata: {deletedCompanyId}}`. Any thrown error during the transaction is caught and surfaced as `{error: "Failed to delete company. Please try again."}`.
 
 The UI (`DeleteCompanyDialog`) requires the operator to type the literal word `DELETE` before the confirm button enables — this is a client-side-only guard; `deleteCompany` itself does not require any confirmation text.
 
@@ -87,7 +87,7 @@ The UI (`DeleteCompanyDialog`) requires the operator to type the literal word `D
 ## 8. Known Issues / Unused Code
 
 - **Duplicate, unprefixed route tree.** `app/(super-admin)/companies/page.tsx`, `.../companies/new/page.tsx`, and `app/(super-admin)/super-admins/page.tsx` are near-duplicates of the `/super-admin/...`-prefixed pages, are **not** linked from `components/super-admin/sidebar.tsx`, and are **not** matched by `proxy.ts`'s `isSuperAdminRoute` check (only the per-page React redirect protects them). `createCompany`'s `revalidatePath("/companies")` call is the only remaining wiring suggesting this was once the primary route tree.
-- **`CompanyMembership` and `CompanyRole` are unused** by any application code. Because the model's foreign keys use `onDelete: Restrict`, if any row were ever created for a company, `deleteCompany`'s `company.delete()` step would throw and the whole deletion (and its generic error message) would fail — a latent risk if this model is ever wired up without updating `deleteCompany`.
+- **`CompanyMembership` and `CompanyRole` are unused** by any application code, but rows can still exist (the live database has one, linking the super admin to the seed company). Because the model's foreign keys use `onDelete: Restrict`, `deleteCompany` explicitly deletes the company's membership rows before `company.delete()`; without that step the whole transaction would fail with the generic error.
 - **`GlobalRole` enum is unused** by any application code.
 - **Impersonation has no audit trail** — no `AuditLog` row is written on enter or exit, unlike company deletion.
 - **Users orphaned by company deletion are left active.** `deleteCompany` nulls their `companyId` but does not deactivate them (`isActive`/`role` untouched) — such a user can still log in with `companyId: null`.

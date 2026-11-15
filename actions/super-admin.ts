@@ -282,6 +282,7 @@ export async function deleteCompany(companyId: string) {
         data: { companyId: null },
       }),
       prisma.auditLog.deleteMany({ where: { companyId } }),
+      prisma.companyMembership.deleteMany({ where: { companyId } }),
       prisma.company.delete({ where: { id: companyId } }),
     ]);
 
