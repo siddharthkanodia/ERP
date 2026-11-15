@@ -1,146 +1,69 @@
-# Raw Materials Module — Feature Spec
+# PRD: Raw Materials
+
+**Part of:** Kanodia Packaging Manufacturing ERP
+**Module status:** Live in production
+**Scope:** Warehouse-level raw material inventory — create, receive stock, edit, ledger history
+**Source of truth:** `actions/raw-materials.ts`, `app/(dashboard)/raw-materials/**`, `components/raw-materials/ReceiveStockForm.tsx`
+
+> This document describes only what the current code does. See §8 for dead/unused code found during review.
 
 ## 1. Overview
-This module manages raw materials inventory used in manufacturing.
-Users can:
-- View a dashboard of all raw materials
-- Track quantity in stock
-- See the last received date
-- Add new raw material types
-- Add received quantities to existing raw materials
 
----
+Raw materials are warehouse-level inventory items, always measured in kilograms (there is no `unit`/`UnitOfMeasure` field on `RawMaterial` at all — the schema hard-codes an implicit KG-only model; every UI label hardcodes "(kg)"). Stock moves from the warehouse to the production floor via the separate Production Floor module (see `production-floor.md`); this module only covers warehouse-side create/receive/edit and the per-material ledger.
 
-## 2. Database Model (Prisma 6)
+## 2. Routes / Pages
 
-Add to prisma/schema.prisma:
+| Route | File | Type | Purpose |
+|---|---|---|---|
+| `/raw-materials` | `app/(dashboard)/raw-materials/page.tsx` | Server component | Dashboard table: Name (links to ledger), "Quantity In Stock (kg)", "Last Received" (`dd MMM yyyy (X kg)` or "Never"), Edit action. Empty state: "No raw materials found. Add your first raw material to start tracking inventory." Header buttons: "Add Raw Material" → `/raw-materials/new`, "Receive Stock" → `/raw-materials/receive` |
+| `/raw-materials/new` | `app/(dashboard)/raw-materials/new/page.tsx` | Client component (`useActionState`) | Create form: Name, Initial Quantity. "Exit" returns to `/raw-materials` without saving |
+| `/raw-materials/receive` | `app/(dashboard)/raw-materials/receive/page.tsx` | Server wrapper around client `ReceiveStockForm` | Batch stock receipt |
+| `/raw-materials/[id]/edit` | `app/(dashboard)/raw-materials/[id]/edit/page.tsx` | Server component + client `EditRawMaterialForm` | Rename a material; redirects to `/raw-materials` if not found |
+| `/raw-materials/[id]/ledger` | `app/(dashboard)/raw-materials/[id]/ledger/page.tsx` | Server component | Read-only ledger: Date & Time, Opening Balance, Received, "Given for Production" (`quantityOut`), Closing Balance, Notes. Empty state: "No transactions recorded yet." Redirects to `/raw-materials` if material missing |
 
-model RawMaterial {
-  id              String    @id @default(cuid())
-  name            String    @unique
-  quantityInStock Decimal   @default(0) @db.Decimal(10,2)
-  lastReceivedAt  DateTime?
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
-}
+## 3. Data Model (relevant fields)
 
----
+- `RawMaterial`: `id`, `companyId`, `name`, `quantityInStock` (`Decimal(10,2)`), `lastReceivedAt?`, `lastReceivedQuantity?`, timestamps. `@@unique([companyId, name])`.
+- `RawMaterialLedger`: `id`, `companyId`, `rawMaterialId`, `workOrderId?`, `date`, `eventType` (`LedgerEventType`: `OPENING_STOCK, RECEIPT, PRODUCTION, DISPATCH, ADJUSTMENT, DELETION_CLEANUP`), `openingBalance`, `quantityIn`, `quantityOut`, `closingBalance`, `notes?`.
 
-## 3. Folder Structure
+## 4. Server Actions (`actions/raw-materials.ts`)
 
-app/(dashboard)/raw-materials/
-  page.tsx              <- Dashboard (table view)
-  new/
-    page.tsx            <- Add new raw material type
-  receive/
-    page.tsx            <- Receive new stock
+All actions require an authenticated session with `companyId` (`Error: "Unauthorized"` otherwise) and scope every query to that `companyId`.
 
-actions/
-  raw-materials.ts      <- All server actions
+| Action | Inputs | Validation (exact strings) | Effect |
+|---|---|---|---|
+| `createRawMaterial(formData)` | `name`, `initialQuantity` | `"Name is required."` (empty after trim); `"Initial quantity must be greater than or equal to 0."` (NaN or `< 0`); duplicate name (`P2002`) → `"A raw material with this name already exists."`; other error → `"Failed to create raw material."` | Creates the row with `quantityInStock = initialQuantity`. **No ledger entry is created on creation** — no `OPENING_STOCK` row is written even though that event type exists. `revalidatePath("/raw-materials")`, then redirect |
+| `receiveStockBatch({items: [{materialId, quantity}], receivedDate, notes?})` | see left — this is the action the UI actually calls (`ReceiveStockForm`) | `"Add at least one material line."`; bad/missing date → `"Received date is required."`; future date → `"Received date cannot be in the future."`; `notes.length > 500` → `"Notes must be at most 500 characters."`; per line: missing material → `"Each item must have a valid raw material."`; `quantity <= 0` → `"Quantity must be greater than 0 for all items."`; material not found → `"One or more raw materials no longer exist."`; other error → `"Failed to receive stock."` | For each line, inside one transaction: `opening = current quantityInStock`, `closing = opening + quantity`; sets `quantityInStock = closing` (absolute set), updates `lastReceivedAt`/`lastReceivedQuantity`; creates a `RawMaterialLedger` row with `eventType: RECEIPT`, notes = trimmed input notes or `"Stock received"`. `revalidatePath("/raw-materials")` and `/raw-materials/receive`, then redirect to `/raw-materials` |
+| `getAllRawMaterials()` | — | — | All company materials, ordered by name ascending, Decimal fields coerced to `Number` |
+| `getRawMaterialById(id)` | id | — | Returns `null` if not found; **throws `Error: "Forbidden"`** if the material belongs to a different company |
+| `updateRawMaterial(id, formData)` | `name` (only editable field) | `"Name is required."`; duplicate (`P2002`) → `"A raw material with this name already exists."`; not found (`P2025`) → `"Selected raw material no longer exists."`; other error → `"Failed to update raw material."` | Updates `name` only — quantity in stock is shown read-only in the edit form and cannot be changed here. `revalidatePath("/raw-materials")`, then redirect |
+| `getRawMaterialLedger(id)` | id | — | Ledger rows for the material, ordered `date desc, createdAt desc`, Decimals coerced to `Number` |
 
----
+## 5. Business Rules
 
-## 4. Pages
+- Material names are unique per company (`@@unique([companyId, name])`), enforced via a caught Prisma `P2002`.
+- Initial quantity and received quantity must be `>= 0` / `> 0` respectively; negative values are rejected both client- and server-side.
+- Received/transaction dates cannot be in the future.
+- Notes on a batch receipt are capped at 500 characters.
+- Quantities are always stored to 2 decimal places (`Decimal(10,2)`).
+- Only `name` is editable after creation — stock quantity can only change via a receipt (this module) or an issuance to the floor (Production Floor module).
 
-### A. Dashboard Page
-Path: app/(dashboard)/raw-materials/page.tsx
+## 6. Access Control
 
-- Server Component
-- Fetch all raw materials via Prisma
-- Display a table with columns:
-  - Name
-  - Quantity In Stock
-  - Last Received Date (formatted with date-fns, show "Never" if null)
-- Two buttons in the page header:
-  - "Add Raw Material" navigates to /raw-materials/new
-  - "Receive Stock" navigates to /raw-materials/receive
+Reachable by ADMIN, MANAGER, and OPERATOR (per `components/sidebar-nav.tsx`, allowed roles `["ADMIN","MANAGER","OPERATOR"]` for the "Raw Materials" nav item); SUPER_ADMIN sees it only while impersonating a company. No role-specific restriction inside `actions/raw-materials.ts` itself beyond requiring a `companyId` on the session.
 
-### B. Add Raw Material Page
-Path: app/(dashboard)/raw-materials/new/page.tsx
+## 7. Edge Cases (as coded)
 
-- Client Component (form interactivity)
-- Form fields:
-  - Raw Material Name (text, required)
-  - Initial Quantity (number, optional, defaults to 0)
-- On submit: calls createRawMaterial server action
-- On success: redirect to /raw-materials
-- Validation Rules:
-  - Name is required (cannot be empty)
-  - Name must be unique — check DB before insert
-  - If duplicate: show inline error "A raw material with this name already exists."
-  - If empty: show inline error "Name is required."
+- Creating a material with a non-zero initial quantity does not generate any ledger history for that opening balance — the ledger for a brand-new material starts empty even though its `quantityInStock` is non-zero.
+- `getRawMaterialById` distinguishes "not found" (`null`) from "found but belongs to another company" (`throw "Forbidden"`) — these are handled differently by callers.
+- `receiveStockBatch` sets `quantityInStock` via an absolute value computed from a freshly-read `opening`, not an atomic `increment`, inside a transaction.
 
-### C. Receive Stock Page
-Path: app/(dashboard)/raw-materials/receive/page.tsx
+## 8. Known Issues / Unused Code
 
-- Client Component (form interactivity)
-- Form fields:
-  - Raw Material (dropdown — populated from existing raw materials in DB)
-  - Quantity Received (number, required)
-- On submit: calls receiveRawMaterial server action
-- On success: redirect to /raw-materials
-- Validation Rules:
-  - Quantity must be greater than 0
-  - Negative values not allowed
-  - Zero not allowed
-  - If invalid: show inline error "Quantity must be greater than 0."
+- **`receiveRawMaterial` (singular, legacy)** exists in `actions/raw-materials.ts` with its own validation (`"Quantity must be greater than 0."`, `"Received date is required."`, `"Received date cannot be in the future."`, synthetic `P2025` → `"Selected raw material no longer exists."`) but has no caller in the current UI — `ReceiveStockForm` calls `receiveStockBatch` exclusively. Appears to be dead code retained from before the batch form existed.
+- **No delete action exists for raw materials** — there is no `deleteRawMaterial` and no delete control in the list UI. The `DELETION_CLEANUP` ledger event type exists in the schema but is never referenced anywhere in this module's code.
+- **Raw materials have no unit-of-measure field** — every quantity is implicitly KG; there is no schema support for a piece-based raw material.
 
----
+## 9. Source Files
 
-## 5. Server Actions
-File: actions/raw-materials.ts
-
-### createRawMaterial(formData)
-- Check if a raw material with the same name already exists
-- If exists: return error "A raw material with this name already exists."
-- If not: insert new RawMaterial row
-- revalidatePath('/raw-materials')
-
-### receiveRawMaterial(formData)
-- Validate quantity > 0
-- Find raw material by ID
-- Add received quantity to existing quantityInStock
-- Set lastReceivedAt = now()
-- revalidatePath('/raw-materials')
-
-### getAllRawMaterials()
-- Fetch all raw materials ordered by name ascending
-- Used in the dashboard table and the receive stock dropdown
-
----
-
-## 6. UI Components (Radix + Tailwind Vega Preset)
-
-- Page layout: consistent with app shell sidebar + header
-- Table: Radix-based, Tailwind styled
-- Buttons: Radix @radix-ui/react-slot based
-- Dropdown: @radix-ui/react-select
-- Inline form errors: red text below the input field
-- "Never" shown in Last Received Date column when lastReceivedAt is null
-- Table: Quantity column header should be "Quantity In Stock (kg)"
-- Forms: Input labels should include "(kg)"
-- Inputs: Must support step="0.01" for decimal values
-
----
-
-## 7. Test Cases
-
-- TC1: Creating a new raw material should appear immediately in the dashboard table.
-- TC2: Receiving stock should correctly add to the existing quantity in stock.
-- TC3: lastReceivedAt should update to current date/time on every receive.
-- TC4: Dashboard should show correct quantities after multiple receive operations.
-- TC5: Dropdown in Receive Stock page should list all existing raw materials.
-- TC6: Creating a raw material with a duplicate name should show an inline error and NOT insert a new row.
-- TC7: Creating a raw material with an empty name should show a validation error.
-- TC8: Entering a negative quantity in Receive Stock should show an inline error and NOT update the stock.
-- TC9: Entering zero as quantity in Receive Stock should show an inline error and NOT update the stock.
-TC10: Entering a decimal value (e.g., 10.55) should save correctly in the DB.
-- TC11: All numeric inputs must block negative values via `min="0"` and server-side validation.
-
----
-
-## 8. Status
-- [x] Phase 1 — Spec: ✅ Complete
-- [x] Phase 2 — UX Blueprint: ✅ Complete
-- [ ] Phase 3 — Build: Pending
-- [ ] Phase 4 — QA Audit: Pending
+`actions/raw-materials.ts`, `app/(dashboard)/raw-materials/{page.tsx,new/page.tsx,receive/page.tsx,[id]/edit/page.tsx,[id]/edit/raw-material-edit-form.tsx,[id]/ledger/page.tsx}`, `components/raw-materials/ReceiveStockForm.tsx`, `prisma/schema.prisma`.
