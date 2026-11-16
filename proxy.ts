@@ -28,6 +28,9 @@ export async function proxy(request: NextRequest) {
 
   if (
     pathname === "/login" ||
+    // Supabase-backed password reset flow — reached while logged out of the app.
+    pathname === "/auth/forgot-password" ||
+    pathname === "/auth/reset-password" ||
     pathname.startsWith("/api") ||
     pathname.startsWith("/_next")
   ) {
