@@ -116,8 +116,8 @@ export function WasteEntryForm({ wasteTypes }: { wasteTypes: WasteType[] }) {
         <label className="text-sm font-medium">Quantity (kg)</label>
         <input
           type="number"
-          min={0.01}
-          step="0.01"
+          min={0.001}
+          step="0.001"
           value={quantity}
           onChange={(e) => setQuantity(e.target.value)}
           className="h-9 w-full rounded-md border bg-background px-3 py-2 text-sm outline-none ring-ring/50 focus-visible:ring-2"

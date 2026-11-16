@@ -6,7 +6,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import { format } from "date-fns";
 import * as Dialog from "@radix-ui/react-dialog";
-import { Pencil, Trash2, ChevronLeft, ChevronRight } from "lucide-react";
+import { Pencil, Trash2, ChevronLeft, ChevronRight, Loader2 } from "lucide-react";
 
 import type { MarkAttendanceInput } from "@/actions/attendance";
 import {
@@ -340,7 +340,14 @@ export function AttendancePage({
           </div>
           <div className="flex items-center gap-3">
             <div className="text-xs text-muted-foreground">
-              {loadingMonth ? "Loading..." : `${attendance.length} records`}
+              {loadingMonth ? (
+                <span className="inline-flex items-center gap-1" role="status">
+                  <Loader2 className="size-3 animate-spin" aria-hidden />
+                  Loading...
+                </span>
+              ) : (
+                `${attendance.length} records`
+              )}
             </div>
             {!isInactive ? (
               <button
@@ -386,7 +393,7 @@ export function AttendancePage({
               </th>
             </tr>
           </thead>
-          <tbody>
+          <tbody className={loadingMonth ? "opacity-50" : undefined}>
             {attendance.map((row) => {
               const d = asDate(row.date);
               const dayLabel = format(d, "EEE");
@@ -465,7 +472,14 @@ export function AttendancePage({
             {attendance.length === 0 ? (
               <tr>
                 <td colSpan={9} className="px-3 py-10 text-center text-sm text-muted-foreground">
-                  No attendance records for this month.
+                  {loadingMonth ? (
+                    <span className="inline-flex items-center gap-2" role="status">
+                      <Loader2 className="size-4 animate-spin" aria-hidden />
+                      Loading attendance...
+                    </span>
+                  ) : (
+                    "No attendance records for this month."
+                  )}
                 </td>
               </tr>
             ) : null}

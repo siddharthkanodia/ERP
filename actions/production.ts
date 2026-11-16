@@ -29,8 +29,8 @@ function parseJsonArray<T>(value: FormDataEntryValue | null): T[] | null {
   }
 }
 
-function round2(value: number) {
-  return Math.round(value * 100) / 100;
+function round3(value: number) {
+  return Math.round(value * 1000) / 1000;
 }
 
 function computeConsumptionKg(input: {
@@ -43,7 +43,7 @@ function computeConsumptionKg(input: {
       code: "WEIGHT_PER_PIECE_REQUIRED",
     });
   }
-  return round2(
+  return round3(
     calculateKgWeight(input.totalProduced, input.unit, input.weightPerPieceKg ?? 0)
   );
 }
@@ -61,7 +61,7 @@ async function readWorkOrderCompletionState(
     },
   });
   if (!wo) return null;
-  const updatedTotalProduced = round2(
+  const updatedTotalProduced = round3(
     wo.productionEntries.reduce(
       (sum, entry) => sum + Number(entry.quantityProduced),
       0
@@ -208,7 +208,7 @@ export async function getAllWorkOrders() {
       (sum, entry) => sum + Number(entry.quantityProduced),
       0
     );
-    const variance = round2(totalProduced - Number(wo.plannedQuantity));
+    const variance = round3(totalProduced - Number(wo.plannedQuantity));
 
     const weightPerPieceKg = wo.finishedProductVariant
       ? Number(wo.finishedProductVariant.weightPerPiece)
@@ -298,7 +298,7 @@ export async function getWorkOrderById(id: string) {
     0
   );
   const plannedQuantity = Number(workOrder.plannedQuantity);
-  const variance = round2(totalProduced - plannedQuantity);
+  const variance = round3(totalProduced - plannedQuantity);
 
   const weightPerPieceKg = workOrder.finishedProductVariant
     ? Number(workOrder.finishedProductVariant.weightPerPiece)
@@ -592,7 +592,7 @@ export async function addProductionEntry(workOrderId: string, formData: FormData
     return { success: true as const };
   }
 
-  const updatedTotalProduced = round2(
+  const updatedTotalProduced = round3(
     postAddWorkOrder.productionEntries.reduce(
       (sum, entry) => sum + Number(entry.quantityProduced),
       0

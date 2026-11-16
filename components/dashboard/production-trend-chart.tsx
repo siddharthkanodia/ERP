@@ -1,5 +1,7 @@
 "use client";
 
+import { formatQty } from "@/lib/utils/units";
+
 import * as Recharts from "recharts";
 import { parseISO, format } from "date-fns";
 
@@ -64,7 +66,7 @@ function CustomTooltip({
               />
               <span className="truncate">{p.name}:</span>
               <span className="ml-auto tabular-nums">
-                {(p.value as number).toFixed(2)} kg
+                {formatQty((p.value as number))} kg
               </span>
             </div>
           ))}

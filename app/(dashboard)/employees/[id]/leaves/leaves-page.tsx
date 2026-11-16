@@ -6,7 +6,7 @@ import Link from "next/link";
 
 import { format } from "date-fns";
 import * as Dialog from "@radix-ui/react-dialog";
-import { Trash2 } from "lucide-react";
+import { Loader2, Trash2 } from "lucide-react";
 
 import type { CreateLeaveInput } from "@/actions/employees";
 import {
@@ -104,9 +104,16 @@ export function LeavePage({
     setLeaves(initialLeaves);
   }, [initialLeaves]);
 
+  const [leavesLoading, setLeavesLoading] = useState(false);
+
   async function refetchLeaves() {
-    const next = await getLeavesByEmployee(employee.id);
-    setLeaves(next);
+    setLeavesLoading(true);
+    try {
+      const next = await getLeavesByEmployee(employee.id);
+      setLeaves(next);
+    } finally {
+      setLeavesLoading(false);
+    }
   }
 
   // Delete modal state
@@ -330,7 +337,17 @@ export function LeavePage({
             </tr>
           </thead>
           <tbody>
-            {leaves.length === 0 ? (
+            {leavesLoading ? (
+              <tr>
+                <td colSpan={7} className="px-3 py-3 text-center text-sm text-muted-foreground">
+                  <span className="inline-flex items-center gap-2" role="status">
+                    <Loader2 className="size-4 animate-spin" aria-hidden />
+                    Refreshing leaves...
+                  </span>
+                </td>
+              </tr>
+            ) : null}
+            {!leavesLoading && leaves.length === 0 ? (
               <tr>
                 <td
                   colSpan={7}

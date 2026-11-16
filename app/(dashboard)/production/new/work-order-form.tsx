@@ -1,5 +1,7 @@
 "use client";
 
+import { formatQty } from "@/lib/utils/units";
+
 import { useActionState, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import * as Select from "@radix-ui/react-select";
@@ -248,7 +250,7 @@ export function CreateWorkOrderForm({
           type="number"
           value={plannedQuantity}
           onChange={(e) => setPlannedQuantity(e.target.value)}
-          step={selectedFinishedProduct?.unit === "PIECE" ? "1" : "0.01"}
+          step={selectedFinishedProduct?.unit === "PIECE" ? "1" : "0.001"}
           min="0"
           className="h-9 w-full rounded-md border bg-background px-3 py-2 text-sm outline-none ring-ring/50 focus-visible:ring-2"
           required
@@ -318,7 +320,7 @@ export function CreateWorkOrderForm({
                               className="relative flex cursor-default items-center rounded-sm py-2 pr-8 pl-2 text-sm outline-none select-none hover:bg-muted data-highlighted:bg-muted data-disabled:cursor-not-allowed data-disabled:opacity-50"
                             >
                               <Select.ItemText>
-                                {material.name} · Floor: {material.floorStock.toFixed(2)} kg
+                                {material.name} · Floor: {formatQty(material.floorStock)} kg
                               </Select.ItemText>
                               <Select.ItemIndicator className="absolute right-2 inline-flex items-center">
                                 <Check className="size-4" />
@@ -336,7 +338,7 @@ export function CreateWorkOrderForm({
                       </p>
                     ) : (
                       <p className="text-xs text-muted-foreground">
-                        Floor stock: {selectedMaterial.floorStock.toFixed(2)} kg
+                        Floor stock: {formatQty(selectedMaterial.floorStock)} kg
                       </p>
                     )
                   ) : null}

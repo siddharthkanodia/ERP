@@ -71,7 +71,7 @@ export default function NewRawMaterialPage() {
             type="number"
             defaultValue={0}
             min={0}
-            step="0.01"
+            step="0.001"
             className="h-9 w-full rounded-md border bg-background px-3 py-2 text-sm outline-none ring-ring/50 focus-visible:ring-2"
           />
         </div>

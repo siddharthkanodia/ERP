@@ -149,14 +149,14 @@ export async function getMonthlyRMEfficiencyReport(
     const monthKey = `${calYear}-${String(calMonth + 1).padStart(2, "0")}`;
     const isCurrentMonth = monthKey === currentMonthKey;
 
-    const rmIssued = Math.round((rmIssuedMap.get(monthKey) ?? 0) * 100) / 100;
+    const rmIssued = Math.round((rmIssuedMap.get(monthKey) ?? 0) * 1000) / 1000;
     const totalProduction =
-      Math.round((productionMap.get(monthKey) ?? 0) * 100) / 100;
-    const totalWaste = Math.round((wasteMap.get(monthKey) ?? 0) * 100) / 100;
+      Math.round((productionMap.get(monthKey) ?? 0) * 1000) / 1000;
+    const totalWaste = Math.round((wasteMap.get(monthKey) ?? 0) * 1000) / 1000;
     const rmConsumed =
-      Math.round((totalProduction + totalWaste) * 100) / 100;
+      Math.round((totalProduction + totalWaste) * 1000) / 1000;
     const differenceQty =
-      Math.round((rmIssued - rmConsumed) * 100) / 100;
+      Math.round((rmIssued - rmConsumed) * 1000) / 1000;
     const differencePercent =
       rmIssued > 0
         ? Math.round(((rmIssued - rmConsumed) / rmIssued) * 10000) / 100

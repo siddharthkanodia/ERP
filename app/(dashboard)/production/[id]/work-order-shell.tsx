@@ -58,7 +58,7 @@ export function WorkOrderShell({
 
   const unitLabel = unit === "PIECE" ? "pcs" : "kg";
   const isReadOnly = status === "COMPLETED";
-  const variance = Math.round((totalProduced - plannedQuantity) * 100) / 100;
+  const variance = Math.round((totalProduced - plannedQuantity) * 1000) / 1000;
   const hasNegativeVariance = variance < 0;
 
   const openCompletionModal = useCallback((snapshot?: CompletionSnapshot) => {
@@ -96,7 +96,7 @@ export function WorkOrderShell({
 
   const modalPlanned = modalSnapshot?.plannedQuantity ?? plannedQuantity;
   const modalTotal = modalSnapshot?.totalProduced ?? totalProduced;
-  const modalVariance = Math.round((modalTotal - modalPlanned) * 100) / 100;
+  const modalVariance = Math.round((modalTotal - modalPlanned) * 1000) / 1000;
   const modalHasNegativeVariance = modalVariance < 0;
 
   function onMarkCompleteClick() {

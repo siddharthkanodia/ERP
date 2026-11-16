@@ -1,5 +1,7 @@
 "use client";
 
+import { formatQty } from "@/lib/utils/units";
+
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import * as Select from "@radix-ui/react-select";
@@ -101,7 +103,7 @@ export function ConsumeFromFloorForm({ materials }: { materials: MaterialOption[
         );
         return;
       }
-      items.push({ materialId: line.materialId, quantity: Math.round(qty * 100) / 100 });
+      items.push({ materialId: line.materialId, quantity: Math.round(qty * 1000) / 1000 });
     }
 
     startTransition(async () => {
@@ -210,7 +212,7 @@ export function ConsumeFromFloorForm({ materials }: { materials: MaterialOption[
                               className="relative flex cursor-default items-center rounded-sm py-2 pr-8 pl-2 text-sm outline-none select-none hover:bg-muted data-highlighted:bg-muted data-disabled:pointer-events-none data-disabled:cursor-not-allowed data-disabled:opacity-50 data-disabled:hover:bg-transparent"
                             >
                               <Select.ItemText>
-                                {m.name} · {m.floorStock.toFixed(2)} kg on floor
+                                {m.name} · {formatQty(m.floorStock)} kg on floor
                                 {isTakenElsewhere ? " (already added)" : ""}
                               </Select.ItemText>
                               <Select.ItemIndicator className="absolute right-2 inline-flex items-center">
@@ -225,15 +227,15 @@ export function ConsumeFromFloorForm({ materials }: { materials: MaterialOption[
                 </Select.Root>
                 {selected ? (
                   <p className="mt-1.5 text-xs text-muted-foreground">
-                    Floor stock: {selected.floorStock.toFixed(2)} kg
+                    Floor stock: {formatQty(selected.floorStock)} kg
                   </p>
                 ) : null}
               </div>
               <div className="flex items-center gap-2 pt-1">
                 <input
                   type="number"
-                  min={0.01}
-                  step="0.01"
+                  min={0.001}
+                  step="0.001"
                   value={line.quantity}
                   onChange={(e) => updateLine(line.id, "quantity", e.target.value)}
                   className="h-9 w-32 rounded-md border bg-background px-3 py-2 text-sm outline-none ring-ring/50 focus-visible:ring-2"

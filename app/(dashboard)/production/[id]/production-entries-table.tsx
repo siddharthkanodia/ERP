@@ -146,7 +146,7 @@ export function ProductionEntriesTable({
                         <input
                           type="number"
                           min="0"
-                          step={unit === "PIECE" ? "1" : "0.01"}
+                          step={unit === "PIECE" ? "1" : "0.001"}
                           value={quantityProduced}
                           onChange={(e) => setQuantityProduced(e.target.value)}
                           className="h-8 w-28 rounded-md border bg-background px-2 py-1 text-right text-sm outline-none ring-ring/50 focus-visible:ring-2"

@@ -40,10 +40,10 @@ export function FinishedGoodsInventoryXLSXButton({
 
         const data = rows.map((r) => ({
           Date: r.dateISO,
-          Opening: Number(r.opening.toFixed(2)),
-          Production: Number(r.production.toFixed(2)),
-          Dispatched: Number(r.dispatched.toFixed(2)),
-          Closing: Number(r.closing.toFixed(2)),
+          Opening: Number(r.opening.toFixed(3)),
+          Production: Number(r.production.toFixed(3)),
+          Dispatched: Number(r.dispatched.toFixed(3)),
+          Closing: Number(r.closing.toFixed(3)),
         }));
 
         const ws = XLSX.utils.json_to_sheet(data, {

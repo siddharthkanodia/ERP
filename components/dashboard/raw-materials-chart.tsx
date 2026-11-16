@@ -1,5 +1,7 @@
 "use client";
 
+import { formatQty } from "@/lib/utils/units";
+
 import * as Recharts from "recharts";
 import { useState } from "react";
 import { Layers, Table as TableIcon } from "lucide-react";
@@ -54,11 +56,11 @@ function CustomTooltip({
       <div className="font-semibold text-foreground">{row.name}</div>
       <div className="mt-1 flex items-center gap-2 text-zinc-700">
         <span className="inline-block size-2 rounded-sm bg-blue-500" />
-        Warehouse: {row.warehouse.toFixed(2)} kg
+        Warehouse: {formatQty(row.warehouse)} kg
       </div>
       <div className="flex items-center gap-2 text-zinc-700">
         <span className="inline-block size-2 rounded-sm bg-amber-500" />
-        Floor: {row.floor.toFixed(2)} kg
+        Floor: {formatQty(row.floor)} kg
       </div>
     </div>
   );
@@ -128,10 +130,10 @@ export function RawMaterialsChart({ data }: { data: RawMaterialRow[] }) {
                     {row.name}
                   </td>
                   <td className="px-2 py-2 text-right tabular-nums text-zinc-700">
-                    {row.warehouse.toFixed(2)}
+                    {formatQty(row.warehouse)}
                   </td>
                   <td className="px-2 py-2 text-right tabular-nums text-zinc-700">
-                    {row.floor.toFixed(2)}
+                    {formatQty(row.floor)}
                   </td>
                 </tr>
               ))}

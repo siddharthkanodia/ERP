@@ -217,7 +217,7 @@ export default function NewFinishedProductPage() {
             <input
               id="initialQuantity"
               type="number"
-              step={unit === "PIECE" ? "1" : "0.01"}
+              step={unit === "PIECE" ? "1" : "0.001"}
               min="0"
               value={initialQuantity}
               onChange={(e) => setInitialQuantity(e.target.value)}
@@ -238,8 +238,8 @@ export default function NewFinishedProductPage() {
               id="weightPerPiece"
               name="weightPerPiece"
               type="number"
-              min="0.01"
-              step="0.01"
+              min="0.001"
+              step="0.001"
               placeholder="e.g. 0.25"
               value={weightPerPiece}
               onChange={(e) => setWeightPerPiece(e.target.value)}
@@ -336,7 +336,7 @@ export default function NewFinishedProductPage() {
                     </label>
                     <input
                       type="number"
-                      step={unit === "PIECE" ? "1" : "0.01"}
+                      step={unit === "PIECE" ? "1" : "0.001"}
                       min="0"
                       value={variant.initialQuantity}
                       onChange={(e) =>
@@ -376,8 +376,8 @@ export default function NewFinishedProductPage() {
                     </label>
                     <input
                       type="number"
-                      step="0.01"
-                      min="0.01"
+                      step="0.001"
+                      min="0.001"
                       value={variant.weightPerPiece}
                       onChange={(e) =>
                         setVariants((prev) =>

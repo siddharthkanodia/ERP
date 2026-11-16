@@ -1,5 +1,7 @@
 "use client";
 
+import { formatQty } from "@/lib/utils/units";
+
 import { useEffect, useMemo, useState } from "react";
 import * as XLSX from "xlsx";
 import { format } from "date-fns";
@@ -56,10 +58,10 @@ function WasteXLSXButton({
 
         const data = rows.map((row) => ({
           Date: row.date,
-          "Opening Balance": Number(row.openingBalance.toFixed(2)),
-          "Waste Generated": Number(row.wasteGenerated.toFixed(2)),
-          "Waste Dispatched": Number(row.wasteDispatched.toFixed(2)),
-          "Closing Balance": Number(row.closingBalance.toFixed(2)),
+          "Opening Balance": Number(row.openingBalance.toFixed(3)),
+          "Waste Generated": Number(row.wasteGenerated.toFixed(3)),
+          "Waste Dispatched": Number(row.wasteDispatched.toFixed(3)),
+          "Closing Balance": Number(row.closingBalance.toFixed(3)),
         }));
 
         const ws = XLSX.utils.json_to_sheet(data, {
@@ -179,8 +181,8 @@ export function WasteReport({
 
   const tableTotals = useMemo(
     () => ({
-      totalGenerated: data.totals.totalGenerated.toFixed(2),
-      totalDispatched: data.totals.totalDispatched.toFixed(2),
+      totalGenerated: formatQty(data.totals.totalGenerated),
+      totalDispatched: formatQty(data.totals.totalDispatched),
     }),
     [data.totals.totalDispatched, data.totals.totalGenerated]
   );
@@ -324,16 +326,16 @@ export function WasteReport({
                 <tr key={row.date} className="border-b hover:bg-muted/30">
                   <td className="px-4 py-3">{row.date}</td>
                   <td className="px-4 py-3 text-right tabular-nums">
-                    {row.openingBalance.toFixed(2)}
+                    {formatQty(row.openingBalance)}
                   </td>
                   <td className="px-4 py-3 text-right tabular-nums">
-                    {row.wasteGenerated === 0 ? "—" : row.wasteGenerated.toFixed(2)}
+                    {row.wasteGenerated === 0 ? "—" : formatQty(row.wasteGenerated)}
                   </td>
                   <td className="px-4 py-3 text-right tabular-nums">
-                    {row.wasteDispatched === 0 ? "—" : row.wasteDispatched.toFixed(2)}
+                    {row.wasteDispatched === 0 ? "—" : formatQty(row.wasteDispatched)}
                   </td>
                   <td className="px-4 py-3 text-right tabular-nums">
-                    {row.closingBalance.toFixed(2)}
+                    {formatQty(row.closingBalance)}
                   </td>
                 </tr>
               ))}

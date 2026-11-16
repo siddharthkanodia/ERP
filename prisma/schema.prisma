@@ -160,9 +160,9 @@ model RawMaterial {
   companyId             String
   company               Company                 @relation(fields: [companyId], references: [id], onDelete: Restrict)
   name                  String
-  quantityInStock       Decimal                 @default(0) @db.Decimal(10, 2)
+  quantityInStock       Decimal                 @default(0) @db.Decimal(12, 3)
   lastReceivedAt        DateTime?
-  lastReceivedQuantity  Decimal?                @db.Decimal(10, 2)
+  lastReceivedQuantity  Decimal?                @db.Decimal(12, 3)
   createdAt             DateTime                @default(now())
   updatedAt             DateTime                @updatedAt
   ledgerEntries         RawMaterialLedger[]
@@ -180,7 +180,7 @@ model ProductionFloorStock {
   company         Company     @relation(fields: [companyId], references: [id], onDelete: Restrict)
   rawMaterialId   String      @unique
   rawMaterial     RawMaterial @relation(fields: [rawMaterialId], references: [id], onDelete: Cascade)
-  quantityInStock Decimal     @default(0) @db.Decimal(10, 2)
+  quantityInStock Decimal     @default(0) @db.Decimal(12, 3)
   lastIssuedAt    DateTime?
   lastConsumedAt  DateTime?
   createdAt       DateTime    @default(now())
@@ -197,10 +197,10 @@ model ProductionFloorLedger {
   rawMaterial    RawMaterial              @relation(fields: [rawMaterialId], references: [id], onDelete: Cascade)
   date           DateTime                 @default(now())
   eventType      ProductionFloorEventType
-  openingBalance Decimal                  @db.Decimal(10, 2)
-  quantityIn     Decimal                  @db.Decimal(10, 2)
-  quantityOut    Decimal                  @db.Decimal(10, 2)
-  closingBalance Decimal                  @db.Decimal(10, 2)
+  openingBalance Decimal                  @db.Decimal(12, 3)
+  quantityIn     Decimal                  @db.Decimal(12, 3)
+  quantityOut    Decimal                  @db.Decimal(12, 3)
+  closingBalance Decimal                  @db.Decimal(12, 3)
   notes          String?
   createdAt      DateTime                 @default(now())
 
@@ -215,12 +215,12 @@ model FinishedProduct {
   name                   String
   unit                   UnitOfMeasure            @default(KG)
   isWaste                Boolean                  @default(false)
-  quantityInStock        Decimal                  @default(0) @db.Decimal(10, 2)
+  quantityInStock        Decimal                  @default(0) @db.Decimal(12, 3)
   weightPerPiece         Decimal?                 @db.Decimal(10, 3) // Weight in KG. Only set when unit = PIECE and no variants.
   isDeleted              Boolean                  @default(false)
   deletedAt              DateTime?
   lastDispatchedAt       DateTime?
-  lastDispatchedQuantity Decimal?                 @db.Decimal(10, 2)
+  lastDispatchedQuantity Decimal?                 @db.Decimal(12, 3)
   createdAt              DateTime                 @default(now())
   updatedAt              DateTime                 @updatedAt
   ledgerEntries          FinishedProductLedger[]
@@ -241,10 +241,10 @@ model RawMaterialLedger {
   date           DateTime        @default(now())
   createdAt      DateTime        @default(now())
   eventType      LedgerEventType @default(ADJUSTMENT)
-  openingBalance Decimal         @db.Decimal(10, 2)
-  quantityIn     Decimal         @db.Decimal(10, 2)
-  quantityOut    Decimal         @db.Decimal(10, 2)
-  closingBalance Decimal         @db.Decimal(10, 2)
+  openingBalance Decimal         @db.Decimal(12, 3)
+  quantityIn     Decimal         @db.Decimal(12, 3)
+  quantityOut    Decimal         @db.Decimal(12, 3)
+  closingBalance Decimal         @db.Decimal(12, 3)
   notes          String?
 
   @@index([companyId])
@@ -263,10 +263,10 @@ model FinishedProductLedger {
   date                     DateTime                @default(now())
   createdAt                DateTime                @default(now())
   eventType                LedgerEventType         @default(PRODUCTION)
-  openingBalance           Decimal                 @db.Decimal(10, 2)
-  quantityProduced         Decimal                 @db.Decimal(10, 2)
-  quantityDispatched       Decimal                 @db.Decimal(10, 2)
-  closingBalance           Decimal                 @db.Decimal(10, 2)
+  openingBalance           Decimal                 @db.Decimal(12, 3)
+  quantityProduced         Decimal                 @db.Decimal(12, 3)
+  quantityDispatched       Decimal                 @db.Decimal(12, 3)
+  closingBalance           Decimal                 @db.Decimal(12, 3)
   notes                    String?
 
   @@index([companyId])
@@ -280,7 +280,7 @@ model FinishedProductVariant {
   finishedProduct   FinishedProduct         @relation(fields: [finishedProductId], references: [id], onDelete: Cascade)
   name              String
   weightPerPiece    Decimal?                @db.Decimal(10, 3) // Weight in KG. Overrides product weightPerPiece when set.
-  quantityInStock   Decimal                 @default(0) @db.Decimal(10, 2)
+  quantityInStock   Decimal                 @default(0) @db.Decimal(12, 3)
   isDeleted         Boolean                 @default(false)
   deletedAt         DateTime?
   createdAt         DateTime                @default(now())
@@ -300,7 +300,7 @@ model WorkOrder {
   finishedProduct          FinishedProduct?        @relation(fields: [finishedProductId], references: [id])
   finishedProductVariantId String?
   finishedProductVariant   FinishedProductVariant? @relation(fields: [finishedProductVariantId], references: [id])
-  plannedQuantity          Decimal                 @db.Decimal(10, 2)
+  plannedQuantity          Decimal                 @db.Decimal(12, 3)
   status                   WorkOrderStatus         @default(OPEN)
   createdAt                DateTime                @default(now())
   updatedAt                DateTime                @updatedAt
@@ -319,7 +319,7 @@ model WorkOrderRawMaterial {
   workOrder      WorkOrder   @relation(fields: [workOrderId], references: [id], onDelete: Cascade)
   rawMaterialId  String
   rawMaterial    RawMaterial @relation(fields: [rawMaterialId], references: [id])
-  quantityIssued Decimal     @default(0) @db.Decimal(10, 2)
+  quantityIssued Decimal     @default(0) @db.Decimal(12, 3)
 
   @@unique([workOrderId, rawMaterialId])
   @@index([companyId])
@@ -332,7 +332,7 @@ model ProductionEntry {
   workOrderId      String
   workOrder        WorkOrder @relation(fields: [workOrderId], references: [id], onDelete: Cascade)
   entryDate        DateTime  @default(now())
-  quantityProduced Decimal   @db.Decimal(10, 2)
+  quantityProduced Decimal   @db.Decimal(12, 3)
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 

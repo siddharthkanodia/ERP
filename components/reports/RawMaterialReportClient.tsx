@@ -1,5 +1,7 @@
 "use client";
 
+import { formatQty } from "@/lib/utils/units";
+
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   format,
@@ -404,16 +406,16 @@ export function RawMaterialReportClient({
                         {r.dateLabel}
                       </td>
                       <td style={{ ...cellStyle, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
-                        {isFuture ? "-" : r.opening.toFixed(2)}
+                        {isFuture ? "-" : formatQty(r.opening)}
                       </td>
                       <td style={{ ...cellStyle, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
-                        {isFuture ? "-" : r.received.toFixed(2)}
+                        {isFuture ? "-" : formatQty(r.received)}
                       </td>
                       <td style={{ ...cellStyle, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
-                        {isFuture ? "-" : r.issued.toFixed(2)}
+                        {isFuture ? "-" : formatQty(r.issued)}
                       </td>
                       <td style={{ ...cellStyle, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
-                        {isFuture ? "-" : r.closing.toFixed(2)}
+                        {isFuture ? "-" : formatQty(r.closing)}
                       </td>
                     </tr>
                   );

@@ -95,7 +95,7 @@ export function EditFinishedProductForm({
     (sum, variant) => sum + (Number(variant.stock) || 0),
     0
   );
-  const remainder = Number((parentCurrentStock - totalVariantStock).toFixed(2));
+  const remainder = Number((parentCurrentStock - totalVariantStock).toFixed(3));
   const allocatedTotal = visibleVariants.reduce(
     (sum, variant) => sum + (parseFloat(allocations[variant.key] ?? "0") || 0),
     0
@@ -137,7 +137,7 @@ export function EditFinishedProductForm({
         return "Pieces must be whole numbers.";
       }
     }
-    if (Math.round(allocatedTotal * 100) / 100 !== Math.round(quantityInStock * 100) / 100) {
+    if (Math.round(allocatedTotal * 1000) / 1000 !== Math.round(quantityInStock * 1000) / 1000) {
       return "Total allocated quantity must equal existing stock.";
     }
     return null;
@@ -383,8 +383,8 @@ export function EditFinishedProductForm({
                       </label>
                       <input
                         type="number"
-                        step="0.01"
-                        min="0.01"
+                        step="0.001"
+                        min="0.001"
                         value={variant.weightPerPiece ?? ""}
                         onChange={(e) =>
                           setVariants((prev) =>
@@ -414,7 +414,7 @@ export function EditFinishedProductForm({
                       </label>
                       <input
                         type="number"
-                        step="0.01"
+                        step="0.001"
                         value={variant.stock ?? ""}
                         onChange={(e) => {
                           setDistributionError(null);
@@ -532,7 +532,7 @@ export function EditFinishedProductForm({
                     <input
                       type="number"
                       min="0"
-                      step={unit === "PIECE" ? "1" : "0.01"}
+                      step={unit === "PIECE" ? "1" : "0.001"}
                       value={allocations[variant.key] ?? "0"}
                       onChange={(e) =>
                         setAllocations((prev) => ({
@@ -554,8 +554,8 @@ export function EditFinishedProductForm({
               Allocated Total: <span className="font-medium">{allocatedTotal}</span>{" "}
               {unit === "PIECE" ? "pcs" : "kg"}
             </p>
-            {Math.round(allocatedTotal * 100) / 100 !==
-            Math.round(quantityInStock * 100) / 100 ? (
+            {Math.round(allocatedTotal * 1000) / 1000 !==
+            Math.round(quantityInStock * 1000) / 1000 ? (
               <p className="mt-1 text-sm text-destructive">
                 Total allocated quantity must equal existing stock.
               </p>

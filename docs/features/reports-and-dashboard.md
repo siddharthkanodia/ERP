@@ -24,9 +24,9 @@
 
 ## 3. Finished Goods Inventory Report (`/reports/inventory`)
 
-Filters: single Product dropdown, From/To Month+Year (future months disabled in the option list; `toKey < fromKey` → `"End month cannot be before start month."`). Columns: `Date, Opening, Production, Dispatched, Closing` (all `.toFixed(2)`).
+Filters: single Product dropdown, From/To Month+Year (future months disabled in the option list; `toKey < fromKey` → `"End month cannot be before start month."`). Columns: `Date, Opening, Production, Dispatched, Closing` (all `formatQty` — 2 decimals, 3 when the third is significant).
 
-Query (`lib/reports/queries.ts::getFinishedGoodsReportRange`, wrapped by `actions/reports.ts::fetchFinishedGoodsInventoryReport`): computes IST-aware UTC day boundaries (`IST offset = +330 minutes`); resolves current stock (sum of variant stock if the product has variants, else product-level stock); pulls production/dispatch ledger totals both inside and after the selected range, then back-calculates the opening balance for the range start and rolls forward day by day. All figures rounded to 2 decimals.
+Query (`lib/reports/queries.ts::getFinishedGoodsReportRange`, wrapped by `actions/reports.ts::fetchFinishedGoodsInventoryReport`): computes IST-aware UTC day boundaries (`IST offset = +330 minutes`); resolves current stock (sum of variant stock if the product has variants, else product-level stock); pulls production/dispatch ledger totals both inside and after the selected range, then back-calculates the opening balance for the range start and rolls forward day by day. All figures rounded to 3 decimals.
 
 XLSX export (`FinishedGoodsInventoryXLSXButton.tsx`): headers `["Date","Opening","Production","Dispatched","Closing"]`; sheet `"Inventory Report"`; filename `FinishedGoods_{product}_{fromMonth}-{toMonth}.xlsx`; only non-future rows are exported.
 

@@ -1,5 +1,6 @@
 "use server";
 
+import { formatQty } from "@/lib/utils/units";
 import { LedgerEventType, ProductionFloorEventType, Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getAuthSession } from "@/lib/auth";
@@ -8,8 +9,8 @@ import { redirect } from "next/navigation";
 
 type LineInput = { materialId: string; quantity: number };
 
-function round2(n: number) {
-  return Math.round(n * 100) / 100;
+function round3(n: number) {
+  return Math.round(n * 1000) / 1000;
 }
 
 function mergeLines(items: LineInput[]) {
@@ -17,7 +18,7 @@ function mergeLines(items: LineInput[]) {
   for (const item of items) {
     if (!item.materialId) continue;
     const prev = map.get(item.materialId) ?? 0;
-    map.set(item.materialId, round2(prev + (Number.isFinite(item.quantity) ? item.quantity : 0)));
+    map.set(item.materialId, round3(prev + (Number.isFinite(item.quantity) ? item.quantity : 0)));
   }
   return Array.from(map.entries()).map(([materialId, quantity]) => ({
     materialId,
@@ -330,7 +331,7 @@ export async function consumeFromFloorBatch(
           });
         }
 
-        const floorClosing = round2(floorOpening - item.quantity);
+        const floorClosing = round3(floorOpening - item.quantity);
 
         await tx.productionFloorStock.update({
           where: { rawMaterialId: item.materialId },
@@ -441,7 +442,7 @@ export async function getFloorReportRange(
     },
   });
 
-  let runningBalance = round2(
+  let runningBalance = round3(
     Number(openingAggregate._sum.quantityIn ?? 0) -
       Number(openingAggregate._sum.quantityOut ?? 0)
   );
@@ -468,11 +469,11 @@ export async function getFloorReportRange(
     const qtyIn = Number(entry.quantityIn);
     const qtyOut = Number(entry.quantityOut);
     if (entry.eventType === "ISSUE") {
-      bucket.issued = round2(bucket.issued + qtyIn);
+      bucket.issued = round3(bucket.issued + qtyIn);
     } else if (entry.eventType === "CONSUME") {
-      bucket.consumed = round2(bucket.consumed + qtyOut);
+      bucket.consumed = round3(bucket.consumed + qtyOut);
     } else {
-      bucket.adjusted = round2(bucket.adjusted + (qtyIn - qtyOut));
+      bucket.adjusted = round3(bucket.adjusted + (qtyIn - qtyOut));
     }
     perDay.set(key, bucket);
   }
@@ -484,12 +485,12 @@ export async function getFloorReportRange(
     const bucket = perDay.get(key) ?? { issued: 0, consumed: 0, adjusted: 0 };
 
     const opening = runningBalance;
-    const closing = round2(opening + bucket.issued - bucket.consumed + bucket.adjusted);
+    const closing = round3(opening + bucket.issued - bucket.consumed + bucket.adjusted);
 
     rows.push({
       dateISO: key,
       dateLabel: formatDateLabel(key),
-      opening: round2(opening),
+      opening: round3(opening),
       issued: bucket.issued,
       consumed: bucket.consumed,
       adjusted: bucket.adjusted,
@@ -520,8 +521,8 @@ async function rebuildFloorBalancesForMaterial(
   for (const entry of entries) {
     const qtyIn = Number(entry.quantityIn);
     const qtyOut = Number(entry.quantityOut);
-    const opening = round2(running);
-    const closing = round2(opening + qtyIn - qtyOut);
+    const opening = round3(running);
+    const closing = round3(opening + qtyIn - qtyOut);
 
     if (closing < 0) {
       throw Object.assign(new Error("Negative closing balance"), {
@@ -558,7 +559,7 @@ async function rebuildFloorBalancesForMaterial(
     await tx.productionFloorStock.update({
       where: { rawMaterialId },
       data: {
-        quantityInStock: round2(running),
+        quantityInStock: round3(running),
         lastIssuedAt,
         lastConsumedAt,
       },
@@ -568,7 +569,7 @@ async function rebuildFloorBalancesForMaterial(
       data: {
         companyId,
         rawMaterialId,
-        quantityInStock: round2(running),
+        quantityInStock: round3(running),
         lastIssuedAt,
         lastConsumedAt,
       },
@@ -654,8 +655,8 @@ export async function updateFloorLedgerEntry(
     return { error: "Notes must be at most 500 characters." };
   }
 
-  const newIn = round2(input.quantityIn);
-  const newOut = round2(input.quantityOut);
+  const newIn = round3(input.quantityIn);
+  const newOut = round3(input.quantityOut);
 
   try {
     await prisma.$transaction(async (tx) => {
@@ -704,10 +705,10 @@ export async function updateFloorLedgerEntry(
 
       if (existing.eventType === ProductionFloorEventType.ISSUE) {
         const oldIn = Number(existing.quantityIn);
-        const delta = round2(newIn - oldIn);
+        const delta = round3(newIn - oldIn);
         if (delta !== 0) {
           const warehouseOpening = Number(existing.rawMaterial.quantityInStock);
-          const warehouseClosing = round2(warehouseOpening - delta);
+          const warehouseClosing = round3(warehouseOpening - delta);
           if (warehouseClosing < 0) {
             throw Object.assign(new Error("Insufficient warehouse"), {
               code: "INSUFFICIENT_WAREHOUSE_STOCK",
@@ -728,7 +729,7 @@ export async function updateFloorLedgerEntry(
               quantityIn: delta < 0 ? -delta : 0,
               quantityOut: delta > 0 ? delta : 0,
               closingBalance: warehouseClosing,
-              notes: `Floor issue edit: adjusted by ${delta > 0 ? "+" : ""}${delta.toFixed(2)} kg`,
+              notes: `Floor issue edit: adjusted by ${delta > 0 ? "+" : ""}${formatQty(delta)} kg`,
             },
           });
         }
@@ -805,7 +806,7 @@ export async function deleteFloorLedgerEntry(
         const oldIn = Number(existing.quantityIn);
         if (oldIn > 0) {
           const warehouseOpening = Number(existing.rawMaterial.quantityInStock);
-          const warehouseClosing = round2(warehouseOpening + oldIn);
+          const warehouseClosing = round3(warehouseOpening + oldIn);
           await tx.rawMaterial.update({
             where: { id: existing.rawMaterialId },
             data: { quantityInStock: warehouseClosing },
@@ -820,7 +821,7 @@ export async function deleteFloorLedgerEntry(
               quantityIn: oldIn,
               quantityOut: 0,
               closingBalance: warehouseClosing,
-              notes: `Floor issue deleted: returned ${oldIn.toFixed(2)} kg to warehouse`,
+              notes: `Floor issue deleted: returned ${formatQty(oldIn)} kg to warehouse`,
             },
           });
         }

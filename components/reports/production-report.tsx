@@ -1,5 +1,7 @@
 "use client";
 
+import { formatQty } from "@/lib/utils/units";
+
 import React, { useCallback, useEffect, useState } from "react";
 import { format } from "date-fns";
 import { ChevronDown, ChevronRight, Download, Loader2 } from "lucide-react";
@@ -26,7 +28,7 @@ function formatDateLabel(iso: string) {
 }
 
 function n2(v: number) {
-  return v.toFixed(2);
+  return formatQty(v);
 }
 
 const MONTHS = [
@@ -213,7 +215,7 @@ function DailyTable({
                   {grandTotalPcs > 0 ? grandTotalPcs.toLocaleString() : "—"}
                 </td>
                 <td className="py-3 px-4 text-right tabular-nums">
-                  {grandTotalKg.toFixed(2)}
+                  {formatQty(grandTotalKg)}
                 </td>
               </tr>
             </tfoot>
@@ -342,7 +344,7 @@ function MonthlyTable({
                   {grandTotalPcs > 0 ? grandTotalPcs.toLocaleString() : "—"}
                 </td>
                 <td className="py-3 px-4 text-right tabular-nums">
-                  {grandTotalKg.toFixed(2)}
+                  {formatQty(grandTotalKg)}
                 </td>
               </tr>
             </tfoot>

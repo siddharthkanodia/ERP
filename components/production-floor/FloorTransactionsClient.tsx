@@ -1,5 +1,7 @@
 "use client";
 
+import { formatQty } from "@/lib/utils/units";
+
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import * as Select from "@radix-ui/react-select";
@@ -58,7 +60,7 @@ export function FloorTransactionsClient({
   function onDelete(entry: FloorLedgerEntry) {
     const confirmText =
       entry.eventType === "ISSUE"
-        ? `Delete this issue of ${entry.quantityIn.toFixed(2)} kg? The quantity will be returned to warehouse stock and downstream balances will be recalculated.`
+        ? `Delete this issue of ${formatQty(entry.quantityIn)} kg? The quantity will be returned to warehouse stock and downstream balances will be recalculated.`
         : `Delete this ${entry.eventType.toLowerCase()} entry? Downstream balances will be recalculated.`;
     if (!window.confirm(confirmText)) return;
 
@@ -171,16 +173,16 @@ export function FloorTransactionsClient({
                       </span>
                     </td>
                     <td className="px-3 py-2 text-right tabular-nums">
-                      {entry.quantityIn > 0 ? entry.quantityIn.toFixed(2) : "-"}
+                      {entry.quantityIn > 0 ? formatQty(entry.quantityIn) : "-"}
                     </td>
                     <td className="px-3 py-2 text-right tabular-nums">
-                      {entry.quantityOut > 0 ? entry.quantityOut.toFixed(2) : "-"}
+                      {entry.quantityOut > 0 ? formatQty(entry.quantityOut) : "-"}
                     </td>
                     <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">
-                      {entry.openingBalance.toFixed(2)}
+                      {formatQty(entry.openingBalance)}
                     </td>
                     <td className="px-3 py-2 text-right tabular-nums font-medium">
-                      {entry.closingBalance.toFixed(2)}
+                      {formatQty(entry.closingBalance)}
                     </td>
                     <td className="px-3 py-2 max-w-[220px] truncate text-muted-foreground">
                       {entry.eventType === "ADJUSTMENT" && adj !== 0 ? (
@@ -191,7 +193,7 @@ export function FloorTransactionsClient({
                           )}
                         >
                           {adj > 0 ? "+" : ""}
-                          {adj.toFixed(2)} kg
+                          {formatQty(adj)} kg
                         </span>
                       ) : null}
                       {entry.notes ?? ""}
@@ -270,7 +272,7 @@ function EditLedgerDialog({
       : entry.eventType === "CONSUME"
       ? entry.quantityOut
       : Math.max(entry.quantityIn, entry.quantityOut);
-  const [quantity, setQuantity] = useState<string>(initialQty.toFixed(2));
+  const [quantity, setQuantity] = useState<string>(formatQty(initialQty));
   const [notes, setNotes] = useState(entry.notes ?? "");
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
@@ -316,8 +318,8 @@ function EditLedgerDialog({
       const result = await updateFloorLedgerEntry(entry.id, {
         date: date.toISOString(),
         notes: notes.trim() === "" ? undefined : notes.trim(),
-        quantityIn: Math.round(quantityIn * 100) / 100,
-        quantityOut: Math.round(quantityOut * 100) / 100,
+        quantityIn: Math.round(quantityIn * 1000) / 1000,
+        quantityOut: Math.round(quantityOut * 1000) / 1000,
       });
       if ("error" in result) {
         setError(result.error);
@@ -415,8 +417,8 @@ function EditLedgerDialog({
             <input
               id="edit-quantity"
               type="number"
-              min={0.01}
-              step="0.01"
+              min={0.001}
+              step="0.001"
               value={quantity}
               onChange={(e) => setQuantity(e.target.value)}
               className="h-9 w-full rounded-md border bg-background px-3 py-2 text-sm outline-none ring-ring/50 focus-visible:ring-2"

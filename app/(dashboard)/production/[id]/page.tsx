@@ -1,3 +1,4 @@
+import { formatQty } from "@/lib/utils/units";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
@@ -186,7 +187,7 @@ export default async function WorkOrderDetailPage({
                       : "font-medium"
                   }`}
                 >
-                  {m.floorStock.toFixed(2)} kg
+                  {formatQty(m.floorStock)} kg
                 </span>
               </li>
             ))}

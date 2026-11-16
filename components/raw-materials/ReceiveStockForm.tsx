@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import * as Select from "@radix-ui/react-select";
 import * as Popover from "@radix-ui/react-popover";
 import { format } from "date-fns";
-import { CalendarIcon, Check, ChevronDown, Trash2 } from "lucide-react";
+import { CalendarIcon, Check, ChevronDown, Loader2, Trash2 } from "lucide-react";
 
 import { getAllRawMaterials, receiveStockBatch } from "@/actions/raw-materials";
 import { Button } from "@/components/ui/button";
@@ -44,12 +44,18 @@ export function ReceiveStockForm() {
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
+  const [materialsLoading, setMaterialsLoading] = useState(true);
+
   useEffect(() => {
     async function loadRawMaterials() {
-      const materials = await getAllRawMaterials();
-      setRawMaterials(
-        materials.map((material) => ({ id: material.id, name: material.name }))
-      );
+      try {
+        const materials = await getAllRawMaterials();
+        setRawMaterials(
+          materials.map((material) => ({ id: material.id, name: material.name }))
+        );
+      } finally {
+        setMaterialsLoading(false);
+      }
     }
     void loadRawMaterials();
   }, []);
@@ -179,6 +185,7 @@ export function ReceiveStockForm() {
               <Select.Root
                 value={line.materialId || undefined}
                 onValueChange={(v) => updateLine(line.id, "materialId", v)}
+                disabled={materialsLoading}
               >
                 <Select.Trigger
                   className={cn(
@@ -186,9 +193,15 @@ export function ReceiveStockForm() {
                     "focus-visible:ring-2 data-placeholder:text-muted-foreground"
                   )}
                 >
-                  <Select.Value placeholder="Select raw material" />
+                  <Select.Value
+                    placeholder={materialsLoading ? "Loading materials..." : "Select raw material"}
+                  />
                   <Select.Icon>
-                    <ChevronDown className="size-4 text-muted-foreground" />
+                    {materialsLoading ? (
+                      <Loader2 className="size-4 animate-spin text-muted-foreground" />
+                    ) : (
+                      <ChevronDown className="size-4 text-muted-foreground" />
+                    )}
                   </Select.Icon>
                 </Select.Trigger>
                 <Select.Portal>
@@ -218,8 +231,8 @@ export function ReceiveStockForm() {
               <label className="text-xs text-muted-foreground sm:sr-only">Qty (kg)</label>
               <input
                 type="number"
-                min={0.01}
-                step="0.01"
+                min={0.001}
+                step="0.001"
                 value={line.quantity}
                 onChange={(e) => updateLine(line.id, "quantity", e.target.value)}
                 className="h-9 w-full rounded-md border bg-background px-3 py-2 text-sm outline-none ring-ring/50 focus-visible:ring-2"

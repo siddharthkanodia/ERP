@@ -23,7 +23,7 @@ Raw materials are warehouse-level inventory items, always measured in kilograms 
 
 ## 3. Data Model (relevant fields)
 
-- `RawMaterial`: `id`, `companyId`, `name`, `quantityInStock` (`Decimal(10,2)`), `lastReceivedAt?`, `lastReceivedQuantity?`, timestamps. `@@unique([companyId, name])`.
+- `RawMaterial`: `id`, `companyId`, `name`, `quantityInStock` (`Decimal(12,3)`), `lastReceivedAt?`, `lastReceivedQuantity?`, timestamps. `@@unique([companyId, name])`.
 - `RawMaterialLedger`: `id`, `companyId`, `rawMaterialId`, `workOrderId?`, `date`, `eventType` (`LedgerEventType`: `OPENING_STOCK, RECEIPT, PRODUCTION, DISPATCH, ADJUSTMENT, DELETION_CLEANUP`), `openingBalance`, `quantityIn`, `quantityOut`, `closingBalance`, `notes?`.
 
 ## 4. Server Actions (`actions/raw-materials.ts`)
@@ -45,7 +45,7 @@ All actions require an authenticated session with `companyId` (`Error: "Unauthor
 - Initial quantity and received quantity must be `>= 0` / `> 0` respectively; negative values are rejected both client- and server-side.
 - Received/transaction dates cannot be in the future.
 - Notes on a batch receipt are capped at 500 characters.
-- Quantities are always stored to 2 decimal places (`Decimal(10,2)`).
+- Quantities are stored to 3 decimal places (`Decimal(12,3)`, since migration `20261116_three_decimal_quantities`); inputs use `step="0.001"`.
 - Only `name` is editable after creation — stock quantity can only change via a receipt (this module) or an issuance to the floor (Production Floor module).
 
 ## 6. Access Control

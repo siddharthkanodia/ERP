@@ -41,11 +41,11 @@ export function FloorReportXLSXButton({
 
         const data = rows.map((r) => ({
           Date: r.dateISO,
-          Opening: Number(r.opening.toFixed(2)),
-          Issued: Number(r.issued.toFixed(2)),
-          Consumed: Number(r.consumed.toFixed(2)),
-          Adjusted: Number(r.adjusted.toFixed(2)),
-          Closing: Number(r.closing.toFixed(2)),
+          Opening: Number(r.opening.toFixed(3)),
+          Issued: Number(r.issued.toFixed(3)),
+          Consumed: Number(r.consumed.toFixed(3)),
+          Adjusted: Number(r.adjusted.toFixed(3)),
+          Closing: Number(r.closing.toFixed(3)),
         }));
 
         const ws = XLSX.utils.json_to_sheet(data, {

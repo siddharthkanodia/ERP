@@ -40,10 +40,10 @@ export function RawMaterialInventoryXLSXButton({
 
         const data = rows.map((r) => ({
           Date: r.dateISO,
-          Opening: Number(r.opening.toFixed(2)),
-          Received: Number(r.received.toFixed(2)),
-          Issued: Number(r.issued.toFixed(2)),
-          Closing: Number(r.closing.toFixed(2)),
+          Opening: Number(r.opening.toFixed(3)),
+          Received: Number(r.received.toFixed(3)),
+          Issued: Number(r.issued.toFixed(3)),
+          Closing: Number(r.closing.toFixed(3)),
         }));
 
         const ws = XLSX.utils.json_to_sheet(data, {

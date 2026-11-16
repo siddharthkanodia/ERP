@@ -1,3 +1,4 @@
+import { formatQty } from "@/lib/utils/units";
 import Link from "next/link";
 import { format } from "date-fns";
 
@@ -67,10 +68,10 @@ export default async function ProductionFloorPage() {
                     </Link>
                   </td>
                   <td className="px-3 py-2 text-right tabular-nums">
-                    {row.inventoryStock.toFixed(2)}
+                    {formatQty(row.inventoryStock)}
                   </td>
                   <td className="px-3 py-2 text-right tabular-nums">
-                    {row.floorStock.toFixed(2)}
+                    {formatQty(row.floorStock)}
                   </td>
                   <td className="px-3 py-2 text-muted-foreground">
                     {row.lastIssuedAt

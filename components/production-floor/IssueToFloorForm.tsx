@@ -1,5 +1,7 @@
 "use client";
 
+import { formatQty } from "@/lib/utils/units";
+
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import * as Select from "@radix-ui/react-select";
@@ -34,7 +36,7 @@ function mergeLines(lines: LineItem[]) {
   }
   return Array.from(map.entries()).map(([materialId, quantity]) => ({
     materialId,
-    quantity: Math.round(quantity * 100) / 100,
+    quantity: Math.round(quantity * 1000) / 1000,
   }));
 }
 
@@ -220,7 +222,7 @@ export function IssueToFloorForm({ materials }: { materials: MaterialOption[] })
                               )}
                             >
                               <Select.ItemText>
-                                {m.name} · {m.inventoryStock.toFixed(2)} kg in stock
+                                {m.name} · {formatQty(m.inventoryStock)} kg in stock
                                 {isTakenElsewhere ? " (already added)" : ""}
                               </Select.ItemText>
                               <Select.ItemIndicator className="absolute right-2 inline-flex items-center">
@@ -235,16 +237,16 @@ export function IssueToFloorForm({ materials }: { materials: MaterialOption[] })
                 </Select.Root>
                 {selected ? (
                   <p className="mt-1.5 text-xs text-muted-foreground">
-                    Inventory: {selected.inventoryStock.toFixed(2)} kg · Floor:{" "}
-                    {selected.floorStock.toFixed(2)} kg
+                    Inventory: {formatQty(selected.inventoryStock)} kg · Floor:{" "}
+                    {formatQty(selected.floorStock)} kg
                   </p>
                 ) : null}
               </div>
               <div className="flex items-center gap-2 pt-1">
                 <input
                   type="number"
-                  min={0.01}
-                  step="0.01"
+                  min={0.001}
+                  step="0.001"
                   value={line.quantity}
                   onChange={(e) => updateLine(line.id, "quantity", e.target.value)}
                   className="h-9 w-32 rounded-md border bg-background px-3 py-2 text-sm outline-none ring-ring/50 focus-visible:ring-2"

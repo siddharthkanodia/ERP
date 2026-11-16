@@ -8,6 +8,8 @@ import * as Dialog from "@radix-ui/react-dialog";
 import * as Switch from "@radix-ui/react-switch";
 import { Trash2 } from "lucide-react";
 
+import { Spinner } from "@/components/ui/loading";
+
 import { setEmployeeStatus, deleteEmployee } from "@/actions/employees";
 import {
   createDepartment,
@@ -79,14 +81,20 @@ export function EmployeeDashboard({ employees }: { employees: EmployeeRow[] }) {
   const [deptName, setDeptName] = useState("");
   const [deptError, setDeptError] = useState<string | null>(null);
   const [deptBusy, setDeptBusy] = useState(false);
+  const [deptLoading, setDeptLoading] = useState(false);
 
   useEffect(() => {
     if (!deptOpen) return;
     (async () => {
-      const list = await getAllDepartments();
-      setDepartments(list);
-      setDeptName("");
-      setDeptError(null);
+      setDeptLoading(true);
+      try {
+        const list = await getAllDepartments();
+        setDepartments(list);
+        setDeptName("");
+        setDeptError(null);
+      } finally {
+        setDeptLoading(false);
+      }
     })();
   }, [deptOpen]);
 
@@ -387,6 +395,9 @@ export function EmployeeDashboard({ employees }: { employees: EmployeeRow[] }) {
               </div>
               {deptError ? <p className="text-sm text-destructive">{deptError}</p> : null}
 
+              {deptLoading ? (
+                <Spinner label="Loading departments..." className="py-6" />
+              ) : (
               <div className="space-y-2">
                 {departments.map((d) => (
                   <div
@@ -419,6 +430,7 @@ export function EmployeeDashboard({ employees }: { employees: EmployeeRow[] }) {
                   <p className="text-sm text-muted-foreground">No departments found.</p>
                 ) : null}
               </div>
+              )}
             </div>
 
             <div className="mt-4 flex justify-end">

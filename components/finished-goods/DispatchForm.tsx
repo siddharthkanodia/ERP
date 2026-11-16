@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import * as Select from "@radix-ui/react-select";
 import * as Popover from "@radix-ui/react-popover";
 import { format } from "date-fns";
-import { CalendarIcon, Check, ChevronDown, Trash2 } from "lucide-react";
+import { CalendarIcon, Check, ChevronDown, Loader2, Trash2 } from "lucide-react";
 
 import {
   dispatchFinishedGoodsBatch,
@@ -88,22 +88,28 @@ export function DispatchForm() {
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
+  const [optionsLoading, setOptionsLoading] = useState(true);
+
   useEffect(() => {
     async function loadProducts() {
-      const res = await getAllFinishedProducts();
-      const raw = res as unknown as ProductOption[];
-      const mapped = raw.map((p) => ({
-        id: p.id,
-        name: p.name,
-        unit: p.unit,
-        quantityInStock: Number(p.quantityInStock),
-        variants: (p.variants ?? []).map((v) => ({
-          id: v.id,
-          name: v.name,
-          quantityInStock: Number(v.quantityInStock),
-        })),
-      }));
-      setOptions(buildSelectOptions(mapped));
+      try {
+        const res = await getAllFinishedProducts();
+        const raw = res as unknown as ProductOption[];
+        const mapped = raw.map((p) => ({
+          id: p.id,
+          name: p.name,
+          unit: p.unit,
+          quantityInStock: Number(p.quantityInStock),
+          variants: (p.variants ?? []).map((v) => ({
+            id: v.id,
+            name: v.name,
+            quantityInStock: Number(v.quantityInStock),
+          })),
+        }));
+        setOptions(buildSelectOptions(mapped));
+      } finally {
+        setOptionsLoading(false);
+      }
     }
     void loadProducts();
   }, []);
@@ -253,7 +259,7 @@ export function DispatchForm() {
         {lines.map((line, index) => {
           const opt = optionForValue(line.finishedGoodId);
           const unitLabel = opt?.unit === "PIECE" ? "pcs" : "kg";
-          const step = opt?.unit === "PIECE" ? "1" : "0.01";
+          const step = opt?.unit === "PIECE" ? "1" : "0.001";
           return (
             <div key={line.id} className="flex w-full items-center gap-3">
               <div className="min-w-0 flex-1">
@@ -263,6 +269,7 @@ export function DispatchForm() {
                 <Select.Root
                   value={line.finishedGoodId || undefined}
                   onValueChange={(v) => updateLine(line.id, "finishedGoodId", v)}
+                  disabled={optionsLoading}
                 >
                   <Select.Trigger
                     className={cn(
@@ -270,9 +277,15 @@ export function DispatchForm() {
                       "focus-visible:ring-2 data-placeholder:text-muted-foreground"
                     )}
                   >
-                    <Select.Value placeholder="Select finished good" />
+                    <Select.Value
+                      placeholder={optionsLoading ? "Loading products..." : "Select finished good"}
+                    />
                     <Select.Icon>
-                      <ChevronDown className="size-4 text-muted-foreground" />
+                      {optionsLoading ? (
+                        <Loader2 className="size-4 animate-spin text-muted-foreground" />
+                      ) : (
+                        <ChevronDown className="size-4 text-muted-foreground" />
+                      )}
                     </Select.Icon>
                   </Select.Trigger>
                   <Select.Portal>
@@ -308,7 +321,7 @@ export function DispatchForm() {
                 </label>
                 <input
                   type="number"
-                  min={opt?.unit === "PIECE" ? 1 : 0.01}
+                  min={opt?.unit === "PIECE" ? 1 : 0.001}
                   step={step}
                   value={line.quantity}
                   onChange={(e) => updateLine(line.id, "quantity", e.target.value)}

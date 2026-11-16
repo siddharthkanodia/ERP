@@ -215,7 +215,7 @@ export default async function DashboardPage() {
     const bucket = trendBuckets.get(key) ?? {};
     const row: ProductionTrendRow = { dateISO: key };
     for (const p of productsInTrend) {
-      row[p] = Number((bucket[p] ?? 0).toFixed(2));
+      row[p] = Number((bucket[p] ?? 0).toFixed(3));
     }
     return row;
   });

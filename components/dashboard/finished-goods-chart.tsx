@@ -1,5 +1,7 @@
 "use client";
 
+import { formatQty } from "@/lib/utils/units";
+
 import { Fragment, useState } from "react";
 import { Tooltip } from "radix-ui";
 import { ChevronDown, ChevronRight, Info } from "lucide-react";
@@ -158,7 +160,7 @@ export function FinishedGoodsChart({ data }: { data: FinishedGoodRow[] }) {
                           )}
                         </td>
                         <td className="px-2 py-2 text-right tabular-nums text-zinc-700">
-                          {row.totalQty.toFixed(2)}
+                          {formatQty(row.totalQty)}
                         </td>
                         <td className="px-2 py-2 text-right text-zinc-700">
                           {unitLabel(row.product.unit)}
@@ -175,7 +177,7 @@ export function FinishedGoodsChart({ data }: { data: FinishedGoodRow[] }) {
                                 {variant.name}
                               </td>
                               <td className="px-2 py-1.5 text-right tabular-nums text-zinc-700">
-                                {variant.quantityInStock.toFixed(2)}
+                                {formatQty(variant.quantityInStock)}
                               </td>
                               <td className="px-2 py-1.5 text-right text-zinc-700">
                                 {unitLabel(row.product.unit)}

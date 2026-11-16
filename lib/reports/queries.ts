@@ -16,8 +16,8 @@ export type FinishedGoodsInventoryReportRow = {
   closing: number;
 };
 
-function round2(n: number) {
-  return Math.round(n * 100) / 100;
+function round3(n: number) {
+  return Math.round(n * 1000) / 1000;
 }
 
 const IST_OFFSET_MS = 330 * 60 * 1000;
@@ -105,10 +105,10 @@ export async function getFinishedGoodsReportRange(
 
   if (!product) return [];
 
-  const currentStock = round2(
+  const currentStock = round3(
     product.variants.length > 0
-      ? round2(product.variants.reduce((s, v) => s + Number(v.quantityInStock), 0))
-      : round2(Number(product.quantityInStock))
+      ? round3(product.variants.reduce((s, v) => s + Number(v.quantityInStock), 0))
+      : round3(Number(product.quantityInStock))
   );
 
   const [prodInRange, dispInRange, prodAfter, dispAfter] = await Promise.all([
@@ -155,32 +155,32 @@ export async function getFinishedGoodsReportRange(
 
   for (const p of prodInRange) {
     const key = toISTDateKey(p.date);
-    dailyProduction[key] = round2(
+    dailyProduction[key] = round3(
       (dailyProduction[key] ?? 0) + Number(p.quantityProduced)
     );
   }
   for (const d of dispInRange) {
     const key = toISTDateKey(d.date);
-    dailyDispatch[key] = round2(
+    dailyDispatch[key] = round3(
       (dailyDispatch[key] ?? 0) + Number(d.quantityDispatched)
     );
   }
 
-  const prodInRangeTotal = round2(
+  const prodInRangeTotal = round3(
     prodInRange.reduce((sum, p) => sum + Number(p.quantityProduced), 0)
   );
-  const dispInRangeTotal = round2(
+  const dispInRangeTotal = round3(
     dispInRange.reduce((sum, p) => sum + Number(p.quantityDispatched), 0)
   );
-  const prodAfterTotal = round2(
+  const prodAfterTotal = round3(
     prodAfter.reduce((sum, p) => sum + Number(p.quantityProduced), 0)
   );
-  const dispAfterTotal = round2(
+  const dispAfterTotal = round3(
     dispAfter.reduce((sum, p) => sum + Number(p.quantityDispatched), 0)
   );
 
-  const stockAtEnd = round2(currentStock - prodAfterTotal + dispAfterTotal);
-  let opening = round2(stockAtEnd - prodInRangeTotal + dispInRangeTotal);
+  const stockAtEnd = round3(currentStock - prodAfterTotal + dispAfterTotal);
+  let opening = round3(stockAtEnd - prodInRangeTotal + dispInRangeTotal);
 
   const days = eachDayOfInterval({ start: uiStart, end: uiEnd });
   const rows: FinishedGoodsInventoryReportRow[] = [];
@@ -191,7 +191,7 @@ export async function getFinishedGoodsReportRange(
 
     const production = dailyProduction[dateKey] ?? 0;
     const dispatched = dailyDispatch[dateKey] ?? 0;
-    const closing = round2(opening + production - dispatched);
+    const closing = round3(opening + production - dispatched);
 
     rows.push({
       dateISO: dateKey,
@@ -270,16 +270,16 @@ export async function getRawMaterialReport(
     if (!dailyTotals[key]) {
       dailyTotals[key] = { received: 0, issued: 0 };
     }
-    dailyTotals[key].received = round2(
+    dailyTotals[key].received = round3(
       dailyTotals[key].received + Number(entry.quantityIn)
     );
-    dailyTotals[key].issued = round2(
+    dailyTotals[key].issued = round3(
       dailyTotals[key].issued + Number(entry.quantityOut)
     );
   }
 
   let opening = latestBeforeRange
-    ? round2(Number(latestBeforeRange.closingBalance))
+    ? round3(Number(latestBeforeRange.closingBalance))
     : 0;
 
   const rows: RawMaterialInventoryReportRow[] = [];
@@ -289,9 +289,9 @@ export async function getRawMaterialReport(
     const dateKey = format(date, "yyyy-MM-dd");
     const dateLabel = formatDateLabelFromISO(dateKey);
 
-    const received = round2(dailyTotals[dateKey]?.received ?? 0);
-    const issued = round2(dailyTotals[dateKey]?.issued ?? 0);
-    const closing = round2(opening + received - issued);
+    const received = round3(dailyTotals[dateKey]?.received ?? 0);
+    const issued = round3(dailyTotals[dateKey]?.issued ?? 0);
+    const closing = round3(opening + received - issued);
 
     rows.push({
       dateISO: dateKey,
@@ -342,8 +342,8 @@ export type ProductionEfficiencyReport = {
   rows: ProductionEfficiencyRow[];
 };
 
-function round2FromNumber(n: number) {
-  return Math.round(n * 100) / 100;
+function round3FromNumber(n: number) {
+  return Math.round(n * 1000) / 1000;
 }
 
 export async function getProductionEfficiencyReport(
@@ -425,7 +425,7 @@ export async function getProductionEfficiencyReport(
       if (!Number.isFinite(produced)) continue;
 
       if (unit === "KG") {
-        producedKg = round2FromNumber(producedKg + produced);
+        producedKg = round3FromNumber(producedKg + produced);
       } else {
         piecesProduced += produced;
       }
@@ -438,13 +438,13 @@ export async function getProductionEfficiencyReport(
           : baseWeightPerPieceKg != null
             ? Number(baseWeightPerPieceKg)
             : 0;
-      producedKg = round2FromNumber(piecesProduced * weightPerPieceKg);
+      producedKg = round3FromNumber(piecesProduced * weightPerPieceKg);
     }
 
-    row.fgPieces = round2FromNumber(row.fgPieces + piecesProduced);
-    row.fgWeightKg = round2FromNumber(row.fgWeightKg + producedKg);
+    row.fgPieces = round3FromNumber(row.fgPieces + piecesProduced);
+    row.fgWeightKg = round3FromNumber(row.fgWeightKg + producedKg);
     const consumptionForWorkOrder = producedKg;
-    row.totalRmRequiredKg = round2FromNumber(row.totalRmRequiredKg + consumptionForWorkOrder);
+    row.totalRmRequiredKg = round3FromNumber(row.totalRmRequiredKg + consumptionForWorkOrder);
 
     const rawMaterialTypeIds = wo.rawMaterials
       .map((rm) => rm.rawMaterialId)
@@ -452,7 +452,7 @@ export async function getProductionEfficiencyReport(
     if (rawMaterialTypeIds.length > 0 && consumptionForWorkOrder > 0) {
       const splitConsumption = consumptionForWorkOrder / rawMaterialTypeIds.length;
       for (const rawMaterialId of rawMaterialTypeIds) {
-        row.rmConsumptionByMaterialId[rawMaterialId] = round2FromNumber(
+        row.rmConsumptionByMaterialId[rawMaterialId] = round3FromNumber(
           row.rmConsumptionByMaterialId[rawMaterialId] + splitConsumption
         );
       }

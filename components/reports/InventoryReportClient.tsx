@@ -1,5 +1,7 @@
 "use client";
 
+import { formatQty } from "@/lib/utils/units";
+
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   format,
@@ -405,16 +407,16 @@ export function InventoryReportClient({
                         {r.dateLabel}
                       </td>
                       <td style={{ ...cellStyle, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
-                        {isFuture ? "-" : r.opening.toFixed(2)}
+                        {isFuture ? "-" : formatQty(r.opening)}
                       </td>
                       <td style={{ ...cellStyle, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
-                        {isFuture ? "-" : r.production.toFixed(2)}
+                        {isFuture ? "-" : formatQty(r.production)}
                       </td>
                       <td style={{ ...cellStyle, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
-                        {isFuture ? "-" : r.dispatched.toFixed(2)}
+                        {isFuture ? "-" : formatQty(r.dispatched)}
                       </td>
                       <td style={{ ...cellStyle, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
-                        {isFuture ? "-" : r.closing.toFixed(2)}
+                        {isFuture ? "-" : formatQty(r.closing)}
                       </td>
                     </tr>
                   );

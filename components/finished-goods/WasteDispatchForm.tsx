@@ -1,5 +1,7 @@
 "use client";
 
+import { formatQty } from "@/lib/utils/units";
+
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import * as Select from "@radix-ui/react-select";
@@ -105,7 +107,7 @@ export function WasteDispatchForm({ wasteTypes }: { wasteTypes: WasteType[] }) {
                     value={w.id}
                     className="relative flex cursor-default items-center rounded-sm py-2 pr-8 pl-2 text-sm outline-none select-none hover:bg-muted data-highlighted:bg-muted"
                   >
-                    <Select.ItemText>{w.name} ({w.quantityInStock.toFixed(2)} kg)</Select.ItemText>
+                    <Select.ItemText>{w.name} ({formatQty(w.quantityInStock)} kg)</Select.ItemText>
                     <Select.ItemIndicator className="absolute right-2 inline-flex items-center">
                       <Check className="size-4" />
                     </Select.ItemIndicator>
@@ -121,8 +123,8 @@ export function WasteDispatchForm({ wasteTypes }: { wasteTypes: WasteType[] }) {
         <label className="text-sm font-medium">Quantity (kg)</label>
         <input
           type="number"
-          min={0.01}
-          step="0.01"
+          min={0.001}
+          step="0.001"
           value={quantity}
           onChange={(e) => setQuantity(e.target.value)}
           className="h-9 w-full rounded-md border bg-background px-3 py-2 text-sm outline-none ring-ring/50 focus-visible:ring-2"

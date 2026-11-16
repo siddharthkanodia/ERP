@@ -1,5 +1,7 @@
 "use client";
 
+import { formatQty } from "@/lib/utils/units";
+
 import { Download } from "lucide-react";
 import {
   Bar,
@@ -15,7 +17,7 @@ import {
 import type { RMEfficiencyMonth } from "@/actions/reports";
 
 function n2(value: number) {
-  return value.toFixed(2);
+  return formatQty(value);
 }
 
 export function RMEfficiencyReport({
@@ -139,7 +141,7 @@ export function RMEfficiencyReport({
                   <td
                     className={`px-3 py-2 text-right tabular-nums font-medium ${diffPctColor}`}
                   >
-                    {n2(row.differencePercent)}%
+                    {row.differencePercent.toFixed(2)}%
                   </td>
                 </tr>
               );
@@ -177,7 +179,7 @@ export function RMEfficiencyReport({
             />
             <Tooltip
               formatter={(value) => [
-                `${Number(value ?? 0).toFixed(2)} kg`,
+                `${formatQty(Number(value ?? 0))} kg`,
               ]}
               labelFormatter={(_label, payload) => {
                 return payload?.[0]?.payload?.fullMonth ?? _label;

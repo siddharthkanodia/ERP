@@ -86,8 +86,8 @@ function parseStockDistributionInput(
   }
 }
 
-function toTwoDecimals(value: number) {
-  return Math.round(value * 100) / 100;
+function toThreeDecimals(value: number) {
+  return Math.round(value * 1000) / 1000;
 }
 
 async function rebuildFinishedProductLedgerBalances(
@@ -727,8 +727,8 @@ function toISODateKeyLocal(d: Date) {
   return `${y}-${m}-${day}`;
 }
 
-function round2(n: number) {
-  return Math.round(n * 100) / 100;
+function round3(n: number) {
+  return Math.round(n * 1000) / 1000;
 }
 
 const IST_OFFSET_MS = 330 * 60 * 1000;
@@ -931,7 +931,7 @@ export async function getWasteReportRange(input: WasteRangeInput): Promise<Waste
   });
   if (!wasteType) return [];
 
-  const currentStock = round2(Number(wasteType.quantityInStock));
+  const currentStock = round3(Number(wasteType.quantityInStock));
 
   const [addedInRange, dispatchedInRange, addedAfter, dispatchedAfter] = await Promise.all([
     prisma.finishedProductLedger.findMany({
@@ -977,30 +977,30 @@ export async function getWasteReportRange(input: WasteRangeInput): Promise<Waste
 
   for (const p of addedInRange) {
     const key = toISTDateKey(p.date);
-    dailyAdded[key] = round2((dailyAdded[key] ?? 0) + Number(p.quantityProduced));
+    dailyAdded[key] = round3((dailyAdded[key] ?? 0) + Number(p.quantityProduced));
   }
   for (const d of dispatchedInRange) {
     const key = toISTDateKey(d.date);
-    dailyDispatch[key] = round2(
+    dailyDispatch[key] = round3(
       (dailyDispatch[key] ?? 0) + Number(d.quantityDispatched)
     );
   }
 
-  const addedInRangeTotal = round2(
+  const addedInRangeTotal = round3(
     addedInRange.reduce((sum, p) => sum + Number(p.quantityProduced), 0)
   );
-  const dispatchedInRangeTotal = round2(
+  const dispatchedInRangeTotal = round3(
     dispatchedInRange.reduce((sum, p) => sum + Number(p.quantityDispatched), 0)
   );
-  const addedAfterTotal = round2(
+  const addedAfterTotal = round3(
     addedAfter.reduce((sum, p) => sum + Number(p.quantityProduced), 0)
   );
-  const dispatchedAfterTotal = round2(
+  const dispatchedAfterTotal = round3(
     dispatchedAfter.reduce((sum, p) => sum + Number(p.quantityDispatched), 0)
   );
 
-  const stockAtEnd = round2(currentStock - addedAfterTotal + dispatchedAfterTotal);
-  let opening = round2(stockAtEnd - addedInRangeTotal + dispatchedInRangeTotal);
+  const stockAtEnd = round3(currentStock - addedAfterTotal + dispatchedAfterTotal);
+  let opening = round3(stockAtEnd - addedInRangeTotal + dispatchedInRangeTotal);
 
   const rows: WasteReportRow[] = [];
   for (
@@ -1011,7 +1011,7 @@ export async function getWasteReportRange(input: WasteRangeInput): Promise<Waste
     const dateKey = toISODateKeyLocal(d);
     const added = dailyAdded[dateKey] ?? 0;
     const dispatched = dailyDispatch[dateKey] ?? 0;
-    const closing = round2(opening + added - dispatched);
+    const closing = round3(opening + added - dispatched);
 
     rows.push({
       dateISO: dateKey,
@@ -1397,10 +1397,10 @@ export async function updateFinishedProduct(id: string, formData: FormData) {
           };
         });
 
-        const allocatedTotal = toTwoDecimals(
+        const allocatedTotal = toThreeDecimals(
           migrationTargets.reduce((sum, row) => sum + row.allocatedQuantity, 0)
         );
-        if (toTwoDecimals(parentStock) !== allocatedTotal) {
+        if (toThreeDecimals(parentStock) !== allocatedTotal) {
           throw Object.assign(
             new Error("Total allocated quantity must equal existing stock."),
             { code: "INVALID_STOCK_DISTRIBUTION" }
@@ -1483,7 +1483,7 @@ export async function updateFinishedProduct(id: string, formData: FormData) {
           continue;
         }
 
-        const initialQty = toTwoDecimals(
+        const initialQty = toThreeDecimals(
           Number.isFinite(variant.initialQuantity) && variant.initialQuantity! >= 0
             ? variant.initialQuantity!
             : 0

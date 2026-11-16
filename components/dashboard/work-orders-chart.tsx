@@ -1,5 +1,7 @@
 "use client";
 
+import { formatQty } from "@/lib/utils/units";
+
 import * as Recharts from "recharts";
 import { useState } from "react";
 import { Tooltip } from "radix-ui";
@@ -60,15 +62,15 @@ function CustomTooltip({
       ) : null}
       <div className="mt-1 flex items-center gap-2 text-zinc-700">
         <span className="inline-block size-2 rounded-sm bg-blue-500" />
-        Planned: {row.planned.toFixed(2)}
+        Planned: {formatQty(row.planned)}
       </div>
       <div className="flex items-center gap-2 text-zinc-700">
         <span className="inline-block size-2 rounded-sm bg-emerald-500" />
-        Produced: {row.produced.toFixed(2)}
+        Produced: {formatQty(row.produced)}
       </div>
       <div className="flex items-center gap-2 text-zinc-700">
         <span className="inline-block size-2 rounded-sm bg-rose-500" />
-        Remaining: {row.remaining.toFixed(2)}
+        Remaining: {formatQty(row.remaining)}
       </div>
     </div>
   );
@@ -192,13 +194,13 @@ export function WorkOrdersChart({ data }: { data: WorkOrderRow[] }) {
                   </td>
                   <td className="px-2 py-2 text-zinc-700">{row.productLabel}</td>
                   <td className="px-2 py-2 text-right tabular-nums text-zinc-700">
-                    {row.planned.toFixed(2)}
+                    {formatQty(row.planned)}
                   </td>
                   <td className="px-2 py-2 text-right tabular-nums text-emerald-600">
-                    {row.produced.toFixed(2)}
+                    {formatQty(row.produced)}
                   </td>
                   <td className="px-2 py-2 text-right tabular-nums text-rose-600">
-                    {row.remaining.toFixed(2)}
+                    {formatQty(row.remaining)}
                   </td>
                 </tr>
               ))}
